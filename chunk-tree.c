@@ -7,8 +7,7 @@
 
 #include "zunkfs.h"
 
-static struct chunk_node *new_chunk_node(struct chunk_tree *ctree,
-		unsigned char *chunk_digest, int leaf)
+static struct chunk_node *new_chunk_node(unsigned char *chunk_digest, int leaf)
 {
 	struct chunk_node *cnode;
 	int err;
@@ -49,7 +48,7 @@ static int grow_chunk_tree(struct chunk_tree *ctree)
 
 	old_root = ctree->root;
 
-	new_root = new_chunk_node(ctree, old_root->chunk_digest, 0);
+	new_root = new_chunk_node(old_root->chunk_digest, 0);
 	if (IS_ERR(new_root))
 		return -PTR_ERR(new_root);
 
@@ -128,7 +127,7 @@ again:
 			parent->dirty = 1;
 		}
 
-		cnode = new_chunk_node(ctree, digest, !i);
+		cnode = new_chunk_node(digest, !i);
 		if (IS_ERR(cnode))
 			return cnode;
 
@@ -214,7 +213,7 @@ int init_chunk_tree(struct chunk_tree *ctree, unsigned nr_leafs,
 		nr_leafs /= DIGESTS_PER_CHUNK;
 	}
 
-	ctree->root = new_chunk_node(ctree, root_digest, !ctree->height);
+	ctree->root = new_chunk_node(root_digest, !ctree->height);
 	if (IS_ERR(ctree->root))
 		return -PTR_ERR(ctree->root);
 

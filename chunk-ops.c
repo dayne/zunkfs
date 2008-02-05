@@ -20,6 +20,7 @@ struct cached_chunk {
 
 static struct cached_chunk *chunk_cache[CHUNK_CACHE_SIZE] = {NULL};
 static struct cached_chunk *zero_chunk = NULL;
+static unsigned long nr_chunks = 0;
 
 static inline unsigned long chunk_index(const unsigned char *digest)
 {
@@ -93,6 +94,8 @@ static struct cached_chunk *cache_chunk(const unsigned char *data,
 	cc->next = *ccp;
 	*ccp = cc;
 
+	nr_chunks ++;
+
 	return cc;
 }
 
@@ -101,7 +104,7 @@ static inline char half_byte2char(unsigned char half_byte)
 	return ((char *)"0123456789abcdef")[half_byte];
 }
 
-static const char *digest2string(const unsigned char *digest)
+const char *digest2string(const unsigned char *digest)
 {
 	static char buf[CHUNK_DIGEST_LEN * 2 + 1];
 	char *ptr;
@@ -121,8 +124,6 @@ int __read_chunk(unsigned char *chunk, const unsigned char *digest,
 {
 	struct cached_chunk *cc;
 
-	TRACE("%s %s\n", caller, digest2string(digest));
-
 	cc = lookup_chunk(digest);
 	if (!cc)
 		return -EIO;
@@ -135,8 +136,6 @@ int __write_chunk(const unsigned char *chunk, unsigned char *digest,
 		const char *caller)
 {
 	digest_chunk(chunk, digest);
-
-	TRACE("%s %s\n", caller, digest2string(digest));
 
 	if (lookup_chunk(digest) || cache_chunk(chunk, digest))
 		return CHUNK_SIZE;
@@ -164,5 +163,10 @@ static void __attribute__((constructor)) init_chunk_ops(void)
 	assert(cc != NULL);
 
 	zero_chunk = cc;
+}
+
+static void __attribute__((destructor)) fini_chunk_ops(void)
+{
+	fprintf(stderr, "nr_chunks: %lu\n", nr_chunks);
 }
 

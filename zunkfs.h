@@ -76,24 +76,18 @@ void unref_chunk(const unsigned char *digest);
  * Mutex ops that save errno.
  */
 #define lock_mutex(mtx) do { \
-	int ___saved_errno = errno; \
 	int ___err = pthread_mutex_lock(mtx); \
 	assert(___err == 0); \
-	errno = ___saved_errno; \
 } while(0)
 
 #define unlock_mutex(mtx) do { \
-	int ___saved_errno = errno; \
 	int ___err = pthread_mutex_unlock(mtx); \
 	assert(___err == 0); \
-	errno = ___saved_errno; \
 } while(0)
 
 #define trylock_mutex(mtx) ({ \
-	int ___saved_errno = errno; \
 	int ___err = pthread_mutex_trylock(mtx); \
 	assert(___err == 0 || ___err == EBUSY); \
-	errno = ___saved_errno; \
 	!___err; \
 })
 

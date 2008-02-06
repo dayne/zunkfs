@@ -37,7 +37,7 @@ int main(int argc, char **argv)
 	dump_ctree(&ctree, indent_start, NULL);
 
 	for (i = 0; i < NR_NODES; i ++) {
-		cnode[i] = get_chunk_nr(&ctree, i);
+		cnode[i] = get_nth_chunk(&ctree, i);
 		if (IS_ERR(cnode[i]))
 			panic("get_chunk_nr(%d): %s\n", i,
 					strerror(PTR_ERR(cnode[i])));
@@ -54,7 +54,7 @@ int main(int argc, char **argv)
 	dump_ctree(&ctree, indent_start, NULL);
 
 	for (i = 0; i < NR_NODES; i ++) {
-		cnode[i] = get_chunk_nr(&ctree, i);
+		cnode[i] = get_nth_chunk(&ctree, i);
 		if (IS_ERR(cnode[i]))
 			panic("get_chunk_nr(%d): %s\n", i,
 					strerror(PTR_ERR(cnode[i])));

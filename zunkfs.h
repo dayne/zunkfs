@@ -1,33 +1,17 @@
 #ifndef __ZUNKFS_H__
 #define __ZUNKFS_H__
 
-/*
- * Linux-ish pointer error handling.
- */
-extern void *const __errbuf;
+#ifndef CHUNK_SIZE
+#define CHUNK_SIZE		(1UL << 16)
+#endif
 
-#define MAX_ERRNO	256
-
-static inline void *ERR_PTR(int err)
-{
-	assert(err >= 0 && err < MAX_ERRNO);
-	return (void *)(__errbuf + err);
-}
-
-static inline int PTR_ERR(const void  *ptr)
-{
-	return ptr - __errbuf;
-}
-
-static inline int IS_ERR(const void *ptr)
-{
-	return ptr >= __errbuf && ptr < __errbuf + MAX_ERRNO;
-}
+#define CHUNK_DIGEST_LEN	20
+#define DIGESTS_PER_CHUNK	(CHUNK_SIZE / CHUNK_DIGEST_LEN)
 
 /*
  * Logging
  */
-void __zprintf(char level, const char *function, int line, const char *fmt, ...);
+void __zprintf(char level, const char *funct, int line, const char *fmt, ...);
 
 extern FILE *zunkfs_log_fd;
 
@@ -43,13 +27,31 @@ extern FILE *zunkfs_log_fd;
 #define ERROR(x...)   zprintf('E', __FUNCTION__, __LINE__, x)
 #define TRACE(x...)   zprintf('T', __FUNCTION__, __LINE__, x)
 
-#ifndef CHUNK_SIZE
-#define CHUNK_SIZE		(1UL << 16)
-#endif
+/*
+ * Linux-ish pointer error handling.
+ */
+extern void *const __errbuf;
 
-#define CHUNK_DIGEST_LEN	20
-#define DIGESTS_PER_CHUNK	(CHUNK_SIZE / CHUNK_DIGEST_LEN)
+#define MAX_ERRNO	256
 
+static inline void *__ERR_PTR(int err, const char *funct, int line)
+{
+	assert(err >= 0 && err < MAX_ERRNO);
+	zprintf('E', funct, line, "%s\n", strerror(err));
+	return (void *)(__errbuf + err);
+}
+
+#define ERR_PTR(err) __ERR_PTR(err, __FUNCTION__, __LINE__)
+
+static inline int PTR_ERR(const void  *ptr)
+{
+	return ptr - __errbuf;
+}
+
+static inline int IS_ERR(const void *ptr)
+{
+	return ptr >= __errbuf && ptr < __errbuf + MAX_ERRNO;
+}
 /*
  * write_chunk() updates 'digest' field.
  */

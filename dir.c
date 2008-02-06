@@ -121,9 +121,6 @@ static void free_dentry(struct dentry *dentry)
 		assert(dentry->ddent != NULL);
 		assert(dentry->ddent_cnode != NULL);
 
-		/*
-		 * This will free ->child ptrs, if any.
-		 */
 		free_chunk_tree(&dentry->chunk_tree);
 
 		dentry->ddent_cnode->child[dentry_index(dentry)] = NULL;

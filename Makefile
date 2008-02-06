@@ -18,6 +18,8 @@ FINAL_OBJS=zunkfs ctree-unit-test dir-unit-test
 
 all: zunkfs 
 
+tests: ctree-unit-test dir-unit-test
+
 zunkfs: $(CORE_OBJS) fuse.o
 	$(CC) -o $@ $^ $(LDFLAGS) #-lsqlite3
 

@@ -143,8 +143,11 @@ again:
 static inline unsigned chunk_nr(const struct chunk_node *cnode)
 {
 	const struct chunk_node *parent = cnode->parent;
+	unsigned nr;
 	assert(parent != NULL);
-	return (cnode->chunk_digest - parent->chunk_data) / CHUNK_DIGEST_LEN;
+	nr = (cnode->chunk_digest - parent->chunk_data) / CHUNK_DIGEST_LEN;
+	assert(nr < DIGESTS_PER_CHUNK);
+	return nr;
 }
 
 static int flush_chunk_node(struct chunk_node *cnode)
@@ -226,7 +229,8 @@ void free_chunk_tree(struct chunk_tree *ctree)
 	struct chunk_node *croot = ctree->root;
 
 	assert(croot->ref_count == 1);
-
+	if (croot->dirty)
+		flush_chunk_node(croot);
 	if (croot->child)
 		free(croot->child);
 	free(croot);

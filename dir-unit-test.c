@@ -30,11 +30,8 @@ static void test2(void);
 
 int main(int argc, char **argv)
 {
-	struct {
-		struct disk_dentry ddent;
-		char name[DDENT_NAME_MAX];
-	} root;
-
+	struct disk_dentry root_ddent;
+	DECLARE_MUTEX(root_mutex);
 	int err;
 
 	fprintf(stderr, "DIRENTS_PER_CHUNK=%lu\n",
@@ -42,16 +39,16 @@ int main(int argc, char **argv)
 
 	zunkfs_log_fd = stdout;
 
-	zero_chunk_digest(root.ddent.digest);
+	zero_chunk_digest(root_ddent.digest);
 
-	namcpy(root.ddent.name, "/");
+	namcpy(root_ddent.name, "/");
 
-	root.ddent.mode = S_IFDIR | S_IRWXU;
-	root.ddent.size = 0;
-	root.ddent.ctime = time(NULL);
-	root.ddent.mtime = time(NULL);
+	root_ddent.mode = S_IFDIR | S_IRWXU;
+	root_ddent.size = 0;
+	root_ddent.ctime = time(NULL);
+	root_ddent.mtime = time(NULL);
 
-	err = set_root(&root.ddent);
+	err = set_root(&root_ddent, &root_mutex);
 	if (err)
 		panic("set_root: %s\n", strerror(-err));
 

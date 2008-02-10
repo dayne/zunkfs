@@ -26,6 +26,10 @@ extern FILE *zunkfs_log_fd;
 #define WARNING(x...) zprintf('W', __FUNCTION__, __LINE__, x)
 #define ERROR(x...)   zprintf('E', __FUNCTION__, __LINE__, x)
 #define TRACE(x...)   zprintf('T', __FUNCTION__, __LINE__, x)
+#define PANIC(x...) do { \
+	zprintf('E', __FUNCTION__, __LINE__, x); \
+	abort(); \
+} while(0)
 
 /*
  * Linux-ish pointer error handling.
@@ -68,29 +72,33 @@ void ref_chunk(const unsigned char *digest);
 void unref_chunk(const unsigned char *digest);
 
 /*
- * Mutex wrappers
+ * Mutex wrappers.
  */
-static inline void lock(pthread_mutex_t *m)
-{
-	int err = pthread_mutex_lock(m);
-	assert(err == 0);
+struct mutex {
+	pthread_mutex_t mutex;
+	pthread_t owner;
+};
+
+#define INIT_MUTEX { \
+	PTHREAD_ERRORCHECK_MUTEX_INITIALIZER_NP, \
+	(pthread_t)-1 \
 }
 
-static inline void unlock(pthread_mutex_t *m)
+#define DECLARE_MUTEX(name) \
+	struct mutex name = INIT_MUTEX
+
+void init_mutex(struct mutex *m);
+void lock(struct mutex *m);
+void unlock(struct mutex *m);
+int trylock(struct mutex *m);
+
+static inline int have_mutex(const struct mutex *m)
 {
-	int err = pthread_mutex_unlock(m);
-	assert(err == 0);
+	return m->owner == pthread_self();
 }
 
-static inline int trylock(pthread_mutex_t *m)
-{
-	int err = pthread_mutex_trylock(m);
-	assert(err == 0 || err == EBUSY);
-	return !err;
-}
-
-#define DECLARE_MUTEX(mtx) \
-	pthread_mutex_t mtx = PTHREAD_ERRORCHECK_MUTEX_INITIALIZER_NP
+void locked_inc(unsigned *v, struct mutex *m);
+void locked_dec(unsigned *v, struct mutex *m);
 
 struct chunk_tree;
 
@@ -145,10 +153,28 @@ struct disk_dentry {
 #define namcmp(nam, str, len)	strncmp((char *)nam, str, len)
 #define DIRENTS_PER_CHUNK	(CHUNK_SIZE / sizeof(struct disk_dentry))
 
+/*
+ * Locking is a bit tricky, as ddent and ddent_cnode
+ * belong to the parent dentry. So set ddent_mutex
+ * to be ->parent->mutex (in 99% of the cases.)
+ * The locking rules are:
+ * 	lock dentry before ddent_mutex
+ * ->ddent->digest	ddent_mutex
+ * ->ddent->mode	ddent_mutex
+ * ->ddent->size	mutex, ddent_mutex
+ * ->ddent->ctime	ddent_mutex
+ * ->ddent->mtime	mutex, ddent_mutex
+ * ->ddent->name	ddent_mutex
+ * ->ddent_cnode->dirty	mutex, ddent_mutex
+ * ->ref_count 		ddent_mutex
+ * ->chunk_tree		mutex
+ */
 struct dentry {
 	struct disk_dentry *ddent;
 	struct chunk_node *ddent_cnode;
+	struct mutex *ddent_mutex;
 	struct dentry *parent;
+	struct mutex mutex;
 	unsigned ref_count;
 	struct chunk_tree chunk_tree;
 };
@@ -166,7 +192,7 @@ static inline struct dentry *find_dentry(const char *path)
 	return find_dentry_parent(path, NULL, NULL) ?: ERR_PTR(ENOENT);
 }
 
-int set_root(struct disk_dentry *ddent);
+int set_root(struct disk_dentry *ddent, struct mutex *ddent_mutex);
 
 /*
  * Misc...

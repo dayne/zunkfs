@@ -21,8 +21,6 @@
 
 #include "zunkfs.h"
 
-static DECLARE_MUTEX(zunkfs);
-
 static int zunkfs_getattr(const char *path, struct stat *stbuf)
 {
 	struct dentry *dentry;
@@ -30,16 +28,15 @@ static int zunkfs_getattr(const char *path, struct stat *stbuf)
 
 	TRACE("%s\n", path);
 
-	lock(&zunkfs);
 	dentry = find_dentry(path);
-	if (IS_ERR(dentry)) {
-		unlock(&zunkfs);
+	if (IS_ERR(dentry))
 		return -PTR_ERR(dentry);
-	}
 
 	memset(stbuf, 0, sizeof(struct stat));
 
 	ddent = dentry->ddent;
+
+	lock(dentry->ddent_mutex);
 
 	stbuf->st_ino = ddent->ctime;
 	stbuf->st_mode = ddent->mode;
@@ -51,8 +48,8 @@ static int zunkfs_getattr(const char *path, struct stat *stbuf)
 	stbuf->st_mtime = ddent->mtime;
 	stbuf->st_ctime = ddent->ctime;
 
+	unlock(dentry->ddent_mutex);
 	put_dentry(dentry);
-	unlock(&zunkfs);
 
 	return 0;
 }
@@ -68,12 +65,9 @@ static int zunkfs_readdir(const char *path, void *filldir_buf,
 
 	TRACE("%s\n", path);
 
-	lock(&zunkfs);
 	dentry = find_dentry(path);
-	if (IS_ERR(dentry)) {
-		unlock(&zunkfs);
+	if (IS_ERR(dentry))
 		return -PTR_ERR(dentry);
-	}
 
 	err = -ENOTDIR;
 	if (!S_ISDIR(dentry->ddent->mode))
@@ -84,13 +78,14 @@ static int zunkfs_readdir(const char *path, void *filldir_buf,
 			filldir(filldir_buf, "..", NULL, 0))
 		goto out;
 
+	/* racy, but should be OK */
 	for (i = 0; i < dentry->ddent->size; i ++) {
 		child = get_nth_dentry(dentry, i);
 		if (IS_ERR(child)) {
 			err = -PTR_ERR(child);
 			goto out;
 		}
-		if (filldir(filldir_buf, child->ddent->name, NULL, 0)) {
+		if (filldir(filldir_buf, (char *)child->ddent->name, NULL, 0)) {
 			put_dentry(child);
 			goto out;
 		}
@@ -98,7 +93,6 @@ static int zunkfs_readdir(const char *path, void *filldir_buf,
 	}
 out:
 	put_dentry(dentry);
-	unlock(&zunkfs);
 	return err;
 }
 
@@ -108,26 +102,20 @@ static int zunkfs_open(const char *path, struct fuse_file_info *fuse_file)
 
 	TRACE("%s\n", path);
 
-	lock(&zunkfs);
 	dentry = find_dentry(path);
-	if (IS_ERR(dentry)) {
-		unlock(&zunkfs);
+	if (IS_ERR(dentry))
 		return -PTR_ERR(dentry);
-	}
 
 	if (S_ISDIR(dentry->ddent->mode)) {
 		put_dentry(dentry);
-		unlock(&zunkfs);
 		return -EISDIR;
 	}
 	if (!S_ISREG(dentry->ddent->mode)) {
 		put_dentry(dentry);
-		unlock(&zunkfs);
 		return -EPERM;
 	}
 
 	fuse_file->fh = (uint64_t)(uintptr_t)dentry;
-	unlock(&zunkfs);
 
 	return 0;
 }
@@ -137,10 +125,11 @@ static int zunkfs_read(const char *path, char *buf, size_t bufsz, off_t offset,
 {
 	struct chunk_node *cnode;
 	struct dentry *dentry;
-	unsigned cplen, len;
+	unsigned cplen;
 	unsigned chunk_nr;
 	unsigned chunk_off;
 	unsigned chunk_size;
+	int len;
 
 	TRACE("path=%p bufsz=%zd offset=%zd\n", path, bufsz, offset);
 
@@ -151,7 +140,7 @@ static int zunkfs_read(const char *path, char *buf, size_t bufsz, off_t offset,
 	chunk_nr = offset / CHUNK_SIZE;
 	chunk_off = offset % CHUNK_SIZE;
 
-	lock(&zunkfs);
+	lock(&dentry->mutex);
 	for (len = 0; len < bufsz; ) {
 		TRACE("chunk_nr=%u chunk_off=%u\n", chunk_nr, chunk_off);
 
@@ -166,9 +155,9 @@ static int zunkfs_read(const char *path, char *buf, size_t bufsz, off_t offset,
 		}
 
 		cnode = get_nth_chunk(&dentry->chunk_tree, chunk_nr);
-		if (!cnode) {
-			unlock(&zunkfs);
-			return -errno;
+		if (IS_ERR(cnode)) {
+			len = -PTR_ERR(cnode);
+			break;
 		}
 
 		cplen = chunk_size;
@@ -184,7 +173,7 @@ static int zunkfs_read(const char *path, char *buf, size_t bufsz, off_t offset,
 		}
 		put_chunk_node(cnode);
 	}
-	unlock(&zunkfs);
+	unlock(&dentry->mutex);
 
 	return len;
 }
@@ -194,9 +183,10 @@ static int zunkfs_write(const char *path, const char *buf, size_t bufsz,
 {
 	struct chunk_node *cnode;
 	struct dentry *dentry;
-	unsigned cplen, len;
+	unsigned cplen;
 	unsigned chunk_nr;
 	unsigned chunk_off;
+	int len;
 
 	TRACE("path=%p bufsz=%zd offset=%zd\n", path, bufsz, offset);
 
@@ -204,25 +194,26 @@ static int zunkfs_write(const char *path, const char *buf, size_t bufsz,
 	if (!dentry)
 		return -EINVAL;
 
-	/*
-	 * Don't allow sparse files.
-	 */
-	lock(&zunkfs);
-	if (offset > dentry->ddent->size) {
-		WARNING("Tried to write at offset %llu (size=%llu)\n",
-				offset, dentry->ddent->size);
-		unlock(&zunkfs);
-		return -EINVAL;
-	}
-
 	chunk_nr = offset / CHUNK_SIZE;
 	chunk_off = offset % CHUNK_SIZE;
 
+	/*
+	 * Don't allow sparse files.
+	 */
+	lock(&dentry->mutex);
+
+	len = -EINVAL;
+	if (offset > dentry->ddent->size) {
+		WARNING("Tried to write at offset %llu (size=%llu)\n",
+				offset, dentry->ddent->size);
+		goto out;
+	}
+
 	for (len = 0; len < bufsz; ) {
 		cnode = get_nth_chunk(&dentry->chunk_tree, chunk_nr);
-		if (!cnode) {
-			lock(&zunkfs);
-			return -errno;
+		if (IS_ERR(cnode)) {
+			len = -PTR_ERR(cnode);
+			break;
 		}
 		cplen = CHUNK_SIZE - chunk_off;
 		if (cplen > bufsz - len)
@@ -241,10 +232,12 @@ static int zunkfs_write(const char *path, const char *buf, size_t bufsz,
 		put_chunk_node(cnode);
 	}
 
+	lock(dentry->ddent_mutex);
 	dentry->ddent->mtime = time(NULL);
 	dentry->ddent_cnode->dirty = 1;
-	unlock(&zunkfs);
-
+	unlock(dentry->ddent_mutex);
+out:
+	unlock(&dentry->mutex);
 	return len;
 }
 
@@ -258,9 +251,7 @@ static int zunkfs_release(const char *path, struct fuse_file_info *fuse_file)
 	if (!dentry)
 		return -EINVAL;
 
-	lock(&zunkfs);
 	put_dentry(dentry);
-	unlock(&zunkfs);
 	return 0;
 }
 
@@ -289,14 +280,10 @@ static int zunkfs_mkdir(const char *path, mode_t mode)
 
 	TRACE("%s %o\n", path, mode);
 
-	lock(&zunkfs);
 	dentry = create_dentry(path, mode | S_IFDIR);
-	if (IS_ERR(dentry)) {
-		unlock(&zunkfs);
+	if (IS_ERR(dentry))
 		return -PTR_ERR(dentry);
-	}
 	put_dentry(dentry);
-	unlock(&zunkfs);
 	return 0;
 }
 
@@ -307,19 +294,14 @@ static int zunkfs_create(const char *path, mode_t mode,
 
 	TRACE("%s mode=%o\n", path, mode);
 
-	lock(&zunkfs);
 	dentry = create_dentry(path, mode | S_IFREG);
-	if (IS_ERR(dentry)) {
-		unlock(&zunkfs);
+	if (IS_ERR(dentry))
 		return -PTR_ERR(dentry);
-	}
 
 	if (fuse_file)
 		fuse_file->fh = (uint64_t)(uintptr_t)dentry;
 	else
 		put_dentry(dentry);
-
-	unlock(&zunkfs);
 
 	return 0;
 }
@@ -335,9 +317,9 @@ static int zunkfs_flush(const char *path, struct fuse_file_info *fuse_file)
 	if (!dentry)
 		return -EINVAL;
 
-	lock(&zunkfs);
+	lock(&dentry->mutex);
 	err = flush_chunk_tree(&dentry->chunk_tree);
-	unlock(&zunkfs);
+	unlock(&dentry->mutex);
 
 	return err;
 }
@@ -349,39 +331,14 @@ static int zunkfs_unlink(const char *path)
 
 	TRACE("%s\n", path);
 
-	lock(&zunkfs);
 	dentry = find_dentry(path);
 	err = -PTR_ERR(dentry);
 	if (!IS_ERR(dentry)) {
 		err = del_dentry(dentry);
 		put_dentry(dentry);
 	}
-	unlock(&zunkfs);
 
 	return err;
-}
-
-static int zunkfs_utimens(const char *path, const struct timespec tv[2])
-{
-	struct dentry *dentry;
-
-	TRACE("%s\n", path);
-
-	lock(&zunkfs);
-	dentry = find_dentry(path);
-	if (IS_ERR(dentry)) {
-		unlock(&zunkfs);
-		return -PTR_ERR(dentry);
-	}
-
-	if (tv[1].tv_sec != dentry->ddent->mtime) {
-		dentry->ddent->mtime = tv[1].tv_sec;
-		dentry->ddent_cnode->dirty = 1;
-	}
-	put_dentry(dentry);
-	unlock(&zunkfs);
-
-	return 0;
 }
 
 static struct fuse_operations zunkfs_operations = {
@@ -395,12 +352,12 @@ static struct fuse_operations zunkfs_operations = {
 	.create		= zunkfs_create,
 	.flush		= zunkfs_flush,
 	.unlink		= zunkfs_unlink,
-	.utimens	= zunkfs_utimens
 };
 
 int main(int argc, char **argv)
 {
 	struct disk_dentry root_ddent;
+	DECLARE_MUTEX(root_mutex);
 	char *log_file;
 	int err;
 
@@ -416,7 +373,7 @@ int main(int argc, char **argv)
 
 	// FIXME: smarter root?
 
-	strcpy(root_ddent.name, "/");
+	namcpy(root_ddent.name, "/");
 	root_ddent.mode = S_IFDIR | S_IRWXU;
 	root_ddent.size = 0;
 	root_ddent.ctime = time(NULL);
@@ -424,7 +381,7 @@ int main(int argc, char **argv)
 
 	zero_chunk_digest(root_ddent.digest);
 
-	err = set_root(&root_ddent);
+	err = set_root(&root_ddent, &root_mutex);
 	if (err) {
 		ERROR("Failed to set root: %s\n", strerror(-err));
 		exit(-1);

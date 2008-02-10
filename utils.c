@@ -4,6 +4,7 @@
 #include <assert.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
@@ -28,7 +29,7 @@ void __zprintf(char level, const char *function, int line, const char *fmt, ...)
 	else
 		abort();
 
-	lock_mutex(&log_mutex);
+	lock(&log_mutex);
 	fprintf(zunkfs_log_fd, "%lx %s %s:%d: ",
 			((unsigned long)pthread_self()) >> 8,
 			level_str, function, line);
@@ -39,14 +40,14 @@ void __zprintf(char level, const char *function, int line, const char *fmt, ...)
 
 	fflush(zunkfs_log_fd);
 
-	unlock_mutex(&log_mutex);
+	unlock(&log_mutex);
 }
 
 void *const __errbuf;
 
 static void __attribute__((constructor)) util_init(void)
 {
-	void *errbuf = mmap(NULL, 4096, PROT_NONE,
+	void *errbuf = mmap(NULL, (MAX_ERRNO + 4095) & ~4095, PROT_NONE,
 			MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
 	if (errbuf == MAP_FAILED) {
 		fprintf(stderr, "errbuf: %s\n", strerror(errno));

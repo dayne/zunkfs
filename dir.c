@@ -2,7 +2,9 @@
 #include <assert.h>
 #include <errno.h>
 #include <limits.h>
+#include <pthread.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -13,11 +15,22 @@
 
 static struct dentry *root_dentry = NULL;
 
+#define children_of(cnode) \
+	((struct dentry **)(cnode)->_private)
+#define dentry_ptr(dentry) \
+	children_of((dentry)->ddent_cnode)[dentry_index(dentry)]
+
 static inline unsigned dentry_index(const struct dentry *dentry)
 {
 	return dentry->ddent -
 		(struct disk_dentry *)dentry->ddent_cnode->chunk_data;
 }
+
+static struct chunk_tree_operations dentry_ctree_ops = {
+	.free_private = free,
+	.read_chunk   = read_chunk,
+	.write_chunk  = write_chunk
+};
 
 static struct dentry *new_dentry(struct dentry *parent,
 		struct disk_dentry *ddent, struct chunk_node *ddent_cnode)
@@ -41,7 +54,8 @@ static struct dentry *new_dentry(struct dentry *parent,
 	else
 		nr_chunks = (ddent->size + CHUNK_SIZE - 1) / CHUNK_SIZE;
 
-	err = init_chunk_tree(&dentry->chunk_tree, nr_chunks, ddent->digest);
+	err = init_chunk_tree(&dentry->chunk_tree, nr_chunks, ddent->digest,
+			&dentry_ctree_ops);
 	if (err < 0)  {
 		free(dentry);
 		return ERR_PTR(-err);
@@ -51,7 +65,7 @@ static struct dentry *new_dentry(struct dentry *parent,
 		parent->ref_count ++;
 		assert(ddent_cnode != NULL);
 		assert(!IS_ERR(ddent_cnode));
-		ddent_cnode->child[dentry_index(dentry)] = dentry;
+		dentry_ptr(dentry) = dentry;
 	}
 
 	return dentry;
@@ -72,14 +86,14 @@ static struct dentry *__get_nth_dentry(struct dentry *parent, unsigned nr)
 	if (IS_ERR(cnode))
 		return (void *)cnode;
 
-	if (!cnode->child) {
-		cnode->child = calloc(DIRENTS_PER_CHUNK,
+	if (!cnode->_private) {
+		cnode->_private = calloc(DIRENTS_PER_CHUNK,
 				sizeof(struct dentry *));
-		if (!cnode->child)
+		if (!cnode->_private)
 			return ERR_PTR(ENOMEM);
 	}
 
-	dentry = cnode->child[chunk_off];
+	dentry = children_of(cnode)[chunk_off];
 	if (dentry)
 		goto got_dentry;
 
@@ -123,7 +137,7 @@ static void free_dentry(struct dentry *dentry)
 
 		free_chunk_tree(&dentry->chunk_tree);
 
-		dentry->ddent_cnode->child[dentry_index(dentry)] = NULL;
+		dentry_ptr(dentry) = NULL;
 		put_chunk_node(dentry->ddent_cnode);
 
 		free(dentry);
@@ -151,7 +165,7 @@ struct dentry *add_dentry(struct dentry *parent, const char *name, mode_t mode)
 	if (IS_ERR(dentry))
 		return dentry;
 
-	strcpy(dentry->ddent->name, name);
+	namcpy(dentry->ddent->name, name);
 
 	dentry->ddent->mode = mode;
 	dentry->ddent->size = 0;
@@ -184,8 +198,8 @@ static void swap_dentries(struct dentry *a, struct dentry *b)
 	b->ddent = ddent;
 	b->ddent_cnode = cnode;
 
-	a->ddent_cnode->child[dentry_index(a)] = a;
-	b->ddent_cnode->child[dentry_index(b)] = b;
+	dentry_ptr(a) = a;
+	dentry_ptr(b) = b;
 
 	tmp_ddent = *a->ddent;
 	*a->ddent = *b->ddent;
@@ -215,7 +229,7 @@ int del_dentry(struct dentry *dentry)
 		put_dentry(tmp);
 	}
 
-	dentry->ddent_cnode->child[dentry_index(dentry)] = NULL;
+	dentry_ptr(dentry) = NULL;
 
 	parent->ddent->size --;
 	parent->ddent->mtime = time(NULL);
@@ -248,7 +262,7 @@ static struct dentry *lookup1(struct dentry *parent, const char *name, int len)
 		dentry = __get_nth_dentry(parent, nr);
 		if (IS_ERR(dentry))
 			return dentry;
-		if (strncmp(dentry->ddent->name, name, len))
+		if (namcmp(dentry->ddent->name, name, len))
 			continue;
 		if (!dentry->ddent->name[len]) {
 			dentry->ref_count ++;

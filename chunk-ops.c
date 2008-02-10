@@ -1,6 +1,7 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
@@ -119,8 +120,7 @@ const char *digest2string(const unsigned char *digest)
 	return buf;
 }
 
-int __read_chunk(unsigned char *chunk, const unsigned char *digest,
-		const char *caller)
+int read_chunk(unsigned char *chunk, const unsigned char *digest)
 {
 	struct cached_chunk *cc;
 
@@ -132,8 +132,7 @@ int __read_chunk(unsigned char *chunk, const unsigned char *digest,
 	return CHUNK_SIZE;
 }
 
-int __write_chunk(const unsigned char *chunk, unsigned char *digest,
-		const char *caller)
+int write_chunk(const unsigned char *chunk, unsigned char *digest)
 {
 	digest_chunk(chunk, digest);
 

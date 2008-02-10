@@ -1,13 +1,19 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <pthread.h>
 
 #include "zunkfs.h"
 
-static struct chunk_node *new_chunk_node(unsigned char *chunk_digest, int leaf)
+#define children_of(cnode) \
+	((struct chunk_node **)(cnode)->_private)
+
+static struct chunk_node *new_chunk_node(struct chunk_tree *ctree,
+		unsigned char *chunk_digest, int leaf)
 {
 	struct chunk_node *cnode;
 	int err;
@@ -18,28 +24,31 @@ static struct chunk_node *new_chunk_node(unsigned char *chunk_digest, int leaf)
 	if (!cnode)
 		return ERR_PTR(ENOMEM);
 
-	cnode->child = NULL;
+	err = -ENOMEM;
+	cnode->_private = NULL;
+	if (!leaf) {
+		cnode->_private = calloc(DIGESTS_PER_CHUNK, sizeof(void *));
+		if (!cnode->_private)
+			goto error;
+	}
+
+	cnode->ctree = ctree;
 	cnode->chunk_digest = chunk_digest;
 	cnode->parent = NULL;
 	cnode->dirty = 0;
 	cnode->ref_count = 0;
 
-	err = read_chunk(cnode->chunk_data, chunk_digest);
+	err = ctree->ops->read_chunk(cnode->chunk_data, chunk_digest);
 	if (err < 0)
 		goto error;
-
-	if (!leaf) {
-		err = -ENOMEM;
-		cnode->child = calloc(DIGESTS_PER_CHUNK, sizeof(void *));
-		if (!cnode->child)
-			goto error;
-	}
 
 	return cnode;
 error:
 	free(cnode);
 	return ERR_PTR(-err);
 }
+
+static void __put_chunk_node(struct chunk_node *node, int leaf);
 
 static int grow_chunk_tree(struct chunk_tree *ctree)
 {
@@ -48,25 +57,25 @@ static int grow_chunk_tree(struct chunk_tree *ctree)
 
 	old_root = ctree->root;
 
-	new_root = new_chunk_node(old_root->chunk_digest, 0);
+	new_root = new_chunk_node(ctree, old_root->chunk_digest, 0);
 	if (IS_ERR(new_root))
 		return -PTR_ERR(new_root);
-
 
 	memset(new_root->chunk_data, 0, CHUNK_SIZE);
 
 	old_root->parent = new_root;
 	old_root->chunk_digest = new_root->chunk_data;
-	memcpy(old_root->chunk_digest, new_root->chunk_digest, CHUNK_DIGEST_LEN);
+	memcpy(old_root->chunk_digest, new_root->chunk_digest,
+			CHUNK_DIGEST_LEN);
 
 	new_root->dirty = 1;
 	new_root->ref_count = 2; /* old_root & ctree */
-	new_root->child[0] = old_root;
+	children_of(new_root)[0] = old_root;
 
 	ctree->height ++;
 	ctree->root = new_root;
 
-	put_chunk_node(old_root);
+	__put_chunk_node(old_root, ctree->height == 1);
 
 	return 0;
 }
@@ -115,9 +124,8 @@ again:
 	i = ctree->height;
 	while (i --) {
 		parent = cnode;
-		assert(parent->child != NULL);
 
-		cnode = parent->child[path[i]];
+		cnode = children_of(parent)[path[i]];
 		if (cnode)
 			continue;
 
@@ -127,12 +135,12 @@ again:
 			parent->dirty = 1;
 		}
 
-		cnode = new_chunk_node(digest, !i);
+		cnode = new_chunk_node(ctree, digest, !i);
 		if (IS_ERR(cnode))
 			return cnode;
 
 		cnode->parent = parent;
-		parent->child[path[i]] = cnode;
+		children_of(parent)[path[i]] = cnode;
 		parent->ref_count ++;
 	}
 
@@ -166,49 +174,52 @@ static int flush_chunk_node(struct chunk_node *cnode)
 	return 0;
 }
 
-static void free_chunk_node(struct chunk_node *cnode)
+static void __put_chunk_node(struct chunk_node *cnode, int leaf)
 {
+	struct chunk_tree *ctree = cnode->ctree;
 	struct chunk_node *parent;
-	int saved_errno = errno;
 	int err;
 
 	for (;;) {
+		if (--cnode->ref_count)
+			break;
+
 		err = flush_chunk_node(cnode);
 		if (err < 0) {
 			WARNING("flush_chunk_node(%p): %s\n", cnode, 
 					strerror(-err));
 		}
 
-		if (cnode->child)
-			free(cnode->child);
+		if (cnode->_private) {
+			if (leaf)
+				ctree->ops->free_private(cnode->_private);
+			else
+				free(cnode->_private);
+		}
 
 		parent = cnode->parent;
 		assert(parent != NULL);
 
-		parent->child[chunk_nr(cnode)] = NULL;
+		children_of(parent)[chunk_nr(cnode)] = NULL;
 		free(cnode);
 
-		if (--parent->ref_count)
-			break;
-
 		cnode = parent;
+		leaf = 0;
 	}
-
-	errno = saved_errno;
 }
 
-void __put_chunk_node(struct chunk_node *cnode, const char *caller)
+void put_chunk_node(struct chunk_node *cnode)
 {
-	if (!--cnode->ref_count)
-		free_chunk_node(cnode);
+	__put_chunk_node(cnode, 1);
 }
 
 int init_chunk_tree(struct chunk_tree *ctree, unsigned nr_leafs,
-		unsigned char *root_digest)
+		unsigned char *root_digest, struct chunk_tree_operations *ops)
 {
 	if (!root_digest)
 		return -EINVAL;
 
+	ctree->ops = ops;
 	ctree->nr_leafs = nr_leafs;
 	ctree->height = 0;
 	while (nr_leafs >= DIGESTS_PER_CHUNK) {
@@ -216,11 +227,12 @@ int init_chunk_tree(struct chunk_tree *ctree, unsigned nr_leafs,
 		nr_leafs /= DIGESTS_PER_CHUNK;
 	}
 
-	ctree->root = new_chunk_node(root_digest, !ctree->height);
+	ctree->root = new_chunk_node(ctree, root_digest, !ctree->height);
 	if (IS_ERR(ctree->root))
 		return -PTR_ERR(ctree->root);
 
 	ctree->root->ref_count ++;
+
 	return 0;
 }
 
@@ -231,21 +243,23 @@ void free_chunk_tree(struct chunk_tree *ctree)
 	assert(croot->ref_count == 1);
 	if (croot->dirty)
 		flush_chunk_node(croot);
-	if (croot->child)
-		free(croot->child);
+	if (croot->_private)
+		free(croot->_private);
 	free(croot);
 }
 
 static int flush_chunk_node_recursive(struct chunk_node *cnode, unsigned height)
 {
+	struct chunk_node *child;
 	unsigned i;
 	int err;
 
 	if (height) {
 		for (i = 0; i < DIGESTS_PER_CHUNK; i ++) {
-			if (!cnode->child[i])
+			child = children_of(cnode)[i];
+			if (!child)
 				continue;
-			err = flush_chunk_node_recursive(cnode, height - 1);
+			err = flush_chunk_node_recursive(child, height - 1);
 			if (err < 0)
 				return err;
 		}

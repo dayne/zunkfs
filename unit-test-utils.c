@@ -1,11 +1,13 @@
 
 
 #include <assert.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <errno.h>
 #include <limits.h>
+#include <pthread.h>
+#include <stdio.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include <sys/stat.h>
 
@@ -16,6 +18,11 @@
 	fprintf(stderr, "PANIC: " x); \
 	abort(); \
 } while(0)
+
+#define cnode_array(cnode) \
+	((struct chunk_node **)(cnode)->_private)
+#define dentry_array(cnode) \
+	((struct dentry **)(cnode)->_private)
 
 void dump_digest(const unsigned char *digest)
 {
@@ -41,15 +48,15 @@ void dump_cnode(struct chunk_node *cnode, const char *indent, int height,
 	else if (!verify_chunk(cnode->chunk_data, cnode->chunk_digest))
 		printf(" [ERR]");
 	printf(" [%s] refcount=%d %p\n", height ? "internal" : "leaf",
-			cnode->ref_count, cnode->child);
+			cnode->ref_count, cnode->_private);
 
 	if (!height) {
-		if (dump_leaf && cnode->child)
-			dump_leaf(cnode->child, indent);
+		if (dump_leaf && cnode->_private)
+			dump_leaf(cnode->_private, indent);
 	} else {
 		for (i = 0; i < DIGESTS_PER_CHUNK; i ++) {
-			dump_cnode(cnode->child[i], indent - 1, height - 1,
-					dump_leaf);
+			dump_cnode(cnode_array(cnode)[i], indent - 1,
+					height - 1, dump_leaf);
 		}
 	}
 }

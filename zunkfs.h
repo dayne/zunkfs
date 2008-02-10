@@ -55,16 +55,11 @@ static inline int IS_ERR(const void *ptr)
 /*
  * write_chunk() updates 'digest' field.
  */
-int __write_chunk(const unsigned char *chunk, unsigned char *digest,
-		const char *caller);
-int __read_chunk(unsigned char *chunk, const unsigned char *digest,
-		const char *caller);
+int write_chunk(const unsigned char *chunk, unsigned char *digest);
+int read_chunk(unsigned char *chunk, const unsigned char *digest);
 void zero_chunk_digest(unsigned char *digest);
 
 int verify_chunk(const unsigned char *chunk, const unsigned char *digest);
-
-#define write_chunk(chunk, digest) __write_chunk(chunk, digest, __FUNCTION__)
-#define read_chunk(chunk, digest) __read_chunk(chunk, digest, __FUNCTION__)
 
 /*
  * chunk garbage collection.
@@ -73,49 +68,60 @@ void ref_chunk(const unsigned char *digest);
 void unref_chunk(const unsigned char *digest);
 
 /*
- * Mutex ops that save errno.
+ * Mutex wrappers
  */
-#define lock_mutex(mtx) do { \
-	int ___err = pthread_mutex_lock(mtx); \
-	assert(___err == 0); \
-} while(0)
+static inline void lock(pthread_mutex_t *m)
+{
+	int err = pthread_mutex_lock(m);
+	assert(err == 0);
+}
 
-#define unlock_mutex(mtx) do { \
-	int ___err = pthread_mutex_unlock(mtx); \
-	assert(___err == 0); \
-} while(0)
+static inline void unlock(pthread_mutex_t *m)
+{
+	int err = pthread_mutex_unlock(m);
+	assert(err == 0);
+}
 
-#define trylock_mutex(mtx) ({ \
-	int ___err = pthread_mutex_trylock(mtx); \
-	assert(___err == 0 || ___err == EBUSY); \
-	!___err; \
-})
+static inline int trylock(pthread_mutex_t *m)
+{
+	int err = pthread_mutex_trylock(m);
+	assert(err == 0 || err == EBUSY);
+	return !err;
+}
 
 #define DECLARE_MUTEX(mtx) \
 	pthread_mutex_t mtx = PTHREAD_ERRORCHECK_MUTEX_INITIALIZER_NP
+
+struct chunk_tree;
+
+struct chunk_tree_operations {
+	void (*free_private)(void *);
+	int (*read_chunk)(unsigned char *chunk, const unsigned char *digest);
+	int (*write_chunk)(const unsigned char *chunk, unsigned char *digest);
+};
 
 struct chunk_node {
 	unsigned char chunk_data[CHUNK_SIZE];
 	unsigned char *chunk_digest;
 	struct chunk_node *parent;
+	struct chunk_tree *ctree;
 	unsigned dirty:1;
 	unsigned ref_count;
-	void **child;
+	void *_private;
 };
 
 struct chunk_tree {
 	struct chunk_node *root;
 	unsigned nr_leafs;
 	unsigned height;
+	struct chunk_tree_operations *ops;
 };
 
 struct chunk_node *get_nth_chunk(struct chunk_tree *ctree, unsigned chunk_nr);
-void __put_chunk_node(struct chunk_node *cnode, const char *caller);
-
-#define put_chunk_node(cnode) __put_chunk_node(cnode, __FUNCTION__)
+void put_chunk_node(struct chunk_node *cnode);
 
 int init_chunk_tree(struct chunk_tree *ctree, unsigned nr_leafs,
-		unsigned char *root_digest);
+		unsigned char *root_digest, struct chunk_tree_operations *ops);
 void free_chunk_tree(struct chunk_tree *ctree);
 int flush_chunk_tree(struct chunk_tree *ctree);
 
@@ -123,25 +129,28 @@ int flush_chunk_tree(struct chunk_tree *ctree);
  * Directory/path stuff.
  */
 
-#define DDENT_NAME_MAX	255
+/* I'd like disk_dentry to fit into 256 bytes. */
+#define DDENT_NAME_MAX	(256 - 44)
 
 struct disk_dentry {
-	unsigned char	digest[CHUNK_DIGEST_LEN];
-	mode_t		mode;
-	off_t		size;
-	time_t		ctime;
-	time_t		mtime;
-	char		name[DDENT_NAME_MAX];
+	uint8_t digest[CHUNK_DIGEST_LEN]; // 20
+	uint32_t mode;                    // 24
+	uint64_t size;                    // 32
+	uint32_t ctime;                   // 40
+	uint32_t mtime;                   // 44
+	uint8_t name[DDENT_NAME_MAX];     // 256
 };
 
+#define namcpy(dst, src)	strcpy((char *)(dst), src)
+#define namcmp(nam, str, len)	strncmp((char *)nam, str, len)
 #define DIRENTS_PER_CHUNK	(CHUNK_SIZE / sizeof(struct disk_dentry))
 
 struct dentry {
-	struct disk_dentry	*ddent;
-	struct chunk_node	*ddent_cnode;
-	struct dentry		*parent;
-	unsigned		ref_count;
-	struct chunk_tree	chunk_tree;
+	struct disk_dentry *ddent;
+	struct chunk_node *ddent_cnode;
+	struct dentry *parent;
+	unsigned ref_count;
+	struct chunk_tree chunk_tree;
 };
 
 struct dentry *get_nth_dentry(struct dentry *parent, unsigned nr);

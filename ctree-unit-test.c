@@ -1,9 +1,11 @@
 
 #include <assert.h>
+#include <errno.h>
+#include <pthread.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <errno.h>
 
 #include "zunkfs.h"
 #include "zunkfs-tests.h"
@@ -18,6 +20,12 @@
 static const char spaces[] = "                                                                                                                                                               ";
 #define indent_start (spaces + sizeof(spaces) - 1)
 
+struct chunk_tree_operations ctree_ops = {
+	.free_private = free,
+	.read_chunk   = read_chunk,
+	.write_chunk  = write_chunk
+};
+
 int main(int argc, char **argv)
 {
 	struct chunk_tree ctree;
@@ -29,7 +37,7 @@ int main(int argc, char **argv)
 
 	zero_chunk_digest(root_digest);
 
-	err = init_chunk_tree(&ctree, 1, root_digest);
+	err = init_chunk_tree(&ctree, 1, root_digest, &ctree_ops);
 	if (err)
 		panic("init_chunk_tree: %s\n", strerror(-err));
 

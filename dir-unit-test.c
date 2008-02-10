@@ -1,13 +1,15 @@
 
 #define _GNU_SOURCE
 #include <assert.h>
-#include <errno.h>
 #include <dirent.h>
+#include <errno.h>
+#include <limits.h>
+#include <pthread.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <limits.h>
 
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -42,7 +44,7 @@ int main(int argc, char **argv)
 
 	zero_chunk_digest(root.ddent.digest);
 
-	strcpy(root.ddent.name, "/");
+	namcpy(root.ddent.name, "/");
 
 	root.ddent.mode = S_IFDIR | S_IRWXU;
 	root.ddent.size = 0;
@@ -53,7 +55,7 @@ int main(int argc, char **argv)
 	if (err)
 		panic("set_root: %s\n", strerror(-err));
 
-	if (0)
+	if (1)
 		test1();
 	if (1)
 		test2();
@@ -197,7 +199,7 @@ again:
 			n ++;
 		}
 	}
-	put_dentry(curr);
+	//put_dentry(curr);
 	closedir(dir);
 
 	if (dlist) {
@@ -220,6 +222,6 @@ again:
 	}
 	printf("\n");
 
-	dump_dentry(root, indent_start);
+	dump_dentry_2(root, indent_start);
 }
 

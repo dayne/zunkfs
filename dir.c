@@ -28,10 +28,62 @@ static inline unsigned dentry_index(const struct dentry *dentry)
 		(struct disk_dentry *)dentry->ddent_cnode->chunk_data;
 }
 
+static int zero_dentry_digest(struct chunk_tree *ctree, unsigned char *digest)
+{
+	const struct dentry *dentry;
+	dentry = container_of(ctree, struct dentry, chunk_tree);
+	memcpy(digest, dentry->ddent->secret_digest, CHUNK_DIGEST_LEN);
+	return 0;
+}
+
+static int read_dentry_chunk(unsigned char *chunk, const unsigned char *digest)
+{
+	const struct chunk_node *cnode;
+	const struct dentry *dentry;
+	int i, err;
+
+	cnode = container_of(chunk, struct chunk_node, chunk_data);
+	dentry = container_of(cnode->ctree, struct dentry, chunk_tree);
+
+	assert(dentry->secret_chunk != NULL);
+
+	err = read_chunk(chunk, digest);
+	if (err < 0)
+		return err;
+
+	for (i = 0; i < CHUNK_SIZE; i ++)
+		chunk[i] ^= dentry->secret_chunk[i];
+
+	return err;
+}
+
+static int write_dentry_chunk(const unsigned char *chunk, unsigned char *digest)
+{
+	const struct chunk_node *cnode;
+	const struct dentry *dentry;
+	unsigned char real_chunk[CHUNK_SIZE];
+	int i, err;
+
+	cnode = container_of(chunk, struct chunk_node, chunk_data);
+	dentry = container_of(cnode->ctree, struct dentry, chunk_tree);
+
+	assert(dentry->secret_chunk != NULL);
+
+	for (i = 0; i < CHUNK_SIZE; i ++)
+		real_chunk[i] = chunk[i] ^ dentry->secret_chunk[i];
+
+	err = write_chunk(real_chunk, digest);
+	if (err < 0)
+		return err;
+
+	return err;
+}
+
 static struct chunk_tree_operations dentry_ctree_ops = {
 	.free_private = free,
-	.read_chunk   = read_chunk,
-	.write_chunk  = write_chunk
+	.read_chunk   = read_dentry_chunk,
+	.write_chunk  = write_dentry_chunk,
+	.zero_digest  = zero_dentry_digest
 };
 
 static struct dentry *new_dentry(struct dentry *parent,
@@ -39,8 +91,6 @@ static struct dentry *new_dentry(struct dentry *parent,
 		struct mutex *ddent_mutex)
 {
 	struct dentry *dentry;
-	unsigned nr_chunks;
-	int err;
 
 	assert(have_mutex(ddent_mutex));
 	
@@ -53,21 +103,10 @@ static struct dentry *new_dentry(struct dentry *parent,
 	dentry->ddent_mutex = ddent_mutex;
 	dentry->parent = parent;
 	dentry->ref_count = 0;
+	dentry->chunk_tree.root = NULL;
+	dentry->secret_chunk = NULL;
 
 	init_mutex(&dentry->mutex);
-
-	if (S_ISDIR(ddent->mode))
-		nr_chunks = (ddent->size + DIRENTS_PER_CHUNK - 1) / 
-			DIRENTS_PER_CHUNK;
-	else
-		nr_chunks = (ddent->size + CHUNK_SIZE - 1) / CHUNK_SIZE;
-
-	err = init_chunk_tree(&dentry->chunk_tree, nr_chunks, ddent->digest,
-			&dentry_ctree_ops);
-	if (err < 0)  {
-		free(dentry);
-		return ERR_PTR(-err);
-	}
 
 	if (parent) {
 		locked_inc(&parent->ref_count, parent->ddent_mutex);
@@ -79,6 +118,60 @@ static struct dentry *new_dentry(struct dentry *parent,
 	return dentry;
 }
 
+int init_disk_dentry(struct disk_dentry *ddent)
+{
+	int err;
+
+	/*
+	 * To properly zero out a dentry chunk, the digest must match 
+	 * the secret digest.
+	 */
+
+	err = random_chunk_digest(ddent->secret_digest);
+	if (err < 0)
+		return err;
+
+	memcpy(ddent->digest, ddent->secret_digest, CHUNK_DIGEST_LEN);
+	return err;
+}
+
+static inline unsigned ddent_chunk_count(struct disk_dentry *ddent)
+{
+	if (S_ISREG(ddent->mode))
+		return (ddent->size + CHUNK_SIZE - 1) / CHUNK_SIZE;
+	assert(S_ISDIR(ddent->mode));
+	return (ddent->size + DIRENTS_PER_CHUNK - 1) / DIRENTS_PER_CHUNK;
+}
+
+struct chunk_node *get_dentry_chunk(struct dentry *dentry, unsigned chunk_nr)
+{
+	assert(have_mutex(&dentry->mutex));
+
+	if (dentry->chunk_tree.root == NULL) {
+		int err;
+
+		/*
+		 * secret must be read before the root chunk is read.
+		 */
+
+		dentry->secret_chunk = malloc(CHUNK_SIZE);
+		if (!dentry->secret_chunk)
+			return ERR_PTR(ENOMEM);
+
+		err = read_chunk(dentry->secret_chunk, dentry->ddent->secret_digest);
+		if (err < 0)
+			return ERR_PTR(-err);
+		
+		err = init_chunk_tree(&dentry->chunk_tree,
+				ddent_chunk_count(dentry->ddent),
+				dentry->ddent->digest, &dentry_ctree_ops);
+		if (err < 0)
+			return ERR_PTR(-err);
+	}
+
+	return get_nth_chunk(&dentry->chunk_tree, chunk_nr);
+}
+
 static struct dentry *__get_nth_dentry(struct dentry *parent, unsigned nr)
 {
 	struct dentry *dentry;
@@ -86,13 +179,14 @@ static struct dentry *__get_nth_dentry(struct dentry *parent, unsigned nr)
 	struct chunk_node *cnode;
 	unsigned chunk_nr;
 	unsigned chunk_off;
+	int err;
 
 	assert(have_mutex(&parent->mutex));
 
 	chunk_nr = nr / DIRENTS_PER_CHUNK;
 	chunk_off = nr % DIRENTS_PER_CHUNK;
 
-	cnode = get_nth_chunk(&parent->chunk_tree, chunk_nr);
+	cnode = get_dentry_chunk(parent, chunk_nr);
 	if (IS_ERR(cnode))
 		return (void *)cnode;
 
@@ -108,8 +202,13 @@ static struct dentry *__get_nth_dentry(struct dentry *parent, unsigned nr)
 		goto got_dentry;
 
 	ddent = (struct disk_dentry *)cnode->chunk_data + chunk_off;
-	if (nr == parent->ddent->size)
-		zero_chunk_digest(ddent->digest);
+	if (nr == parent->ddent->size) {
+		err = init_disk_dentry(ddent);
+		if (err < 0) {
+			dentry = ERR_PTR(-err);
+			goto error;
+		}
+	}
 
 	dentry = new_dentry(parent, ddent, cnode, &parent->mutex);
 	if (IS_ERR(dentry))
@@ -148,7 +247,11 @@ static void free_dentry(struct dentry *dentry)
 	assert(dentry->ddent != NULL);
 	assert(dentry->ddent_cnode != NULL);
 
-	free_chunk_tree(&dentry->chunk_tree);
+	if (dentry->chunk_tree.root) {
+		assert(dentry->secret_chunk != NULL);
+		free(dentry->secret_chunk);
+		free_chunk_tree(&dentry->chunk_tree);
+	}
 
 	dentry_ptr(dentry) = NULL;
 	put_chunk_node(dentry->ddent_cnode);
@@ -382,10 +485,12 @@ int set_root(struct disk_dentry *ddent, struct mutex *ddent_mutex)
 	assert(root_dentry == NULL || IS_ERR(root_dentry));
 
 	lock(ddent_mutex);
+
 	root_dentry = new_dentry(NULL, ddent, NULL, ddent_mutex);
-	err = -PTR_ERR(root_dentry);
-	if (IS_ERR(root_dentry))
+	if (IS_ERR(root_dentry)) {
+		err = -PTR_ERR(root_dentry);
 		goto out;
+	}
 
 	root_dentry->ref_count ++;
 	err = 0;

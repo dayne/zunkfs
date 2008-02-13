@@ -106,19 +106,18 @@ static inline char half_byte2char(unsigned char half_byte)
 	return ((char *)"0123456789abcdef")[half_byte];
 }
 
-const char *digest2string(const unsigned char *digest)
+const char *__digest_string(const unsigned char *digest, char *strbuf)
 {
-	static char buf[CHUNK_DIGEST_LEN * 2 + 1];
 	char *ptr;
 	int i;
 
-	for (i = 0, ptr = buf; i < CHUNK_DIGEST_LEN; i ++) {
+	for (i = 0, ptr = strbuf; i < CHUNK_DIGEST_LEN; i ++) {
 		*ptr++ = half_byte2char(digest[i] & 0xf);
 		*ptr++ = half_byte2char((digest[i] >> 4) & 0xf);
 	}
 	*ptr = 0;
 
-	return buf;
+	return strbuf;
 }
 
 int read_chunk(unsigned char *chunk, const unsigned char *digest)
@@ -146,6 +145,18 @@ int write_chunk(const unsigned char *chunk, unsigned char *digest)
 void zero_chunk_digest(unsigned char *digest)
 {
 	memcpy(digest, zero_chunk->chunk_digest, CHUNK_DIGEST_LEN);
+}
+
+#define INT_CHUNK_SIZE	((CHUNK_SIZE + sizeof(int) - 1) / sizeof(int))
+
+int random_chunk_digest(unsigned char *digest)
+{
+	int i, chunk_data[INT_CHUNK_SIZE];
+
+	for (i = 0; i < INT_CHUNK_SIZE; i ++)
+		chunk_data[i] = rand();
+
+	return write_chunk((void *)chunk_data, digest);
 }
 
 static void __attribute__((constructor)) init_chunk_ops(void)

@@ -154,7 +154,7 @@ static int zunkfs_read(const char *path, char *buf, size_t bufsz, off_t offset,
 				break;
 		}
 
-		cnode = get_nth_chunk(&dentry->chunk_tree, chunk_nr);
+		cnode = get_dentry_chunk(dentry, chunk_nr);
 		if (IS_ERR(cnode)) {
 			len = -PTR_ERR(cnode);
 			break;
@@ -210,7 +210,7 @@ static int zunkfs_write(const char *path, const char *buf, size_t bufsz,
 	}
 
 	for (len = 0; len < bufsz; ) {
-		cnode = get_nth_chunk(&dentry->chunk_tree, chunk_nr);
+		cnode = get_dentry_chunk(dentry, chunk_nr);
 		if (IS_ERR(cnode)) {
 			len = -PTR_ERR(cnode);
 			break;
@@ -379,7 +379,13 @@ int main(int argc, char **argv)
 	root_ddent.ctime = time(NULL);
 	root_ddent.mtime = time(NULL);
 
-	zero_chunk_digest(root_ddent.digest);
+	err = random_chunk_digest(root_ddent.secret_digest);
+	if (err < 0) {
+		ERROR("random_chunk_digest: %s\n", strerror(-err));
+		exit(-1);
+	}
+
+	memcpy(root_ddent.digest, root_ddent.secret_digest, CHUNK_DIGEST_LEN);
 
 	err = set_root(&root_ddent, &root_mutex);
 	if (err) {

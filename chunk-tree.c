@@ -133,14 +133,16 @@ again:
 
 		digest = parent->chunk_data + path[i] * CHUNK_DIGEST_LEN;
 		if (max_path && max_path[i] != path[i]) {
-			zero_chunk_digest(digest);
+			err = ctree->ops->zero_digest(ctree, digest);
+			if (err < 0)
+				return ERR_PTR(-err);
 			parent->dirty = 1;
 		}
 
 		cnode = new_chunk_node(ctree, digest, !i);
 		if (IS_ERR(cnode))
 			return cnode;
-
+		
 		cnode->parent = parent;
 		children_of(parent)[path[i]] = cnode;
 		parent->ref_count ++;
@@ -165,7 +167,7 @@ static int flush_chunk_node(struct chunk_node *cnode)
 	int err;
 
 	if (cnode->dirty) {
-		err = write_chunk(cnode->chunk_data, cnode->chunk_digest);
+		err = cnode->ctree->ops->write_chunk(cnode->chunk_data, cnode->chunk_digest);
 		if (err < 0)
 			return err;
 		if (cnode->parent)

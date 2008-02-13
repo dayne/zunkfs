@@ -11,7 +11,7 @@
 #include "zunkfs.h"
 #include "zunkfs-tests.h"
 
-#define NR_NODES	8 * DIGESTS_PER_CHUNK
+#define NR_NODES	50 * DIGESTS_PER_CHUNK
 
 #define panic(x...) do { \
 	fprintf(stderr, "PANIC: " x); \
@@ -21,10 +21,52 @@
 static const char spaces[] = "                                                                                                                                                               ";
 #define indent_start (spaces + sizeof(spaces) - 1)
 
+static unsigned char rand_digest[CHUNK_DIGEST_LEN];
+static unsigned char rand_chunk[CHUNK_SIZE];
+
+static int test_zero_digest(struct chunk_tree *ctree, unsigned char *digest)
+{
+	memcpy(digest, rand_digest, CHUNK_DIGEST_LEN);
+	return 0;
+}
+
+static int test_read_chunk(unsigned char *chunk, const unsigned char *digest)
+{
+	int i, err;
+
+	printf("test_read_chunk: %s\n", digest_string(digest));
+
+	err = read_chunk(chunk, digest);
+	if (err < 0)
+		return err;
+
+	for (i = 0; i < CHUNK_SIZE; i ++)
+		chunk[i] ^= rand_chunk[i];
+
+	return err;
+}
+
+static int test_write_chunk(const unsigned char *chunk, unsigned char *digest)
+{
+	unsigned char real_chunk[CHUNK_SIZE];
+	int i, err;
+
+	for (i = 0; i < CHUNK_SIZE; i ++)
+		real_chunk[i] = chunk[i] ^ rand_chunk[i];
+
+	err = write_chunk(real_chunk, digest);
+	if (err < 0)
+		return err;
+
+	printf("test_write_chunk: %s\n", digest_string(digest));
+	return err;
+}
+
 struct chunk_tree_operations ctree_ops = {
 	.free_private = free,
-	.read_chunk   = read_chunk,
-	.write_chunk  = write_chunk
+	.read_chunk   = test_read_chunk,
+	.write_chunk  = test_write_chunk,
+	.zero_digest  = test_zero_digest
 };
 
 int main(int argc, char **argv)
@@ -36,7 +78,15 @@ int main(int argc, char **argv)
 
 	zunkfs_log_fd = stdout;
 
-	zero_chunk_digest(root_digest);
+	err = random_chunk_digest(rand_digest);
+	if (err < 0)
+		panic("random_chunk_digest: %s\n", strerror(-err));
+
+	err = read_chunk(rand_chunk, rand_digest);
+	if (err < 0)
+		panic("read_chunk(rand_chunk): %s\n", strerror(-err));
+
+	test_zero_digest(NULL, root_digest);
 
 	err = init_chunk_tree(&ctree, 1, root_digest, &ctree_ops);
 	if (err)

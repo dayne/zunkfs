@@ -6,6 +6,7 @@
 #endif
 
 #define CHUNK_DIGEST_LEN	20
+#define CHUNK_DIGEST_STRLEN	(CHUNK_DIGEST_LEN * 2)
 #define DIGESTS_PER_CHUNK	(CHUNK_SIZE / CHUNK_DIGEST_LEN)
 
 /*
@@ -40,9 +41,11 @@ extern void *const __errbuf;
 
 static inline void *__ERR_PTR(int err, const char *funct, int line)
 {
-	assert(err >= 0 && err < MAX_ERRNO);
-	zprintf('E', funct, line, "%s\n", strerror(err));
-	return (void *)(__errbuf + err);
+	if (err > 0 && err < MAX_ERRNO) {
+		zprintf('E', funct, line, "%s\n", strerror(err));
+		return (void *)(__errbuf + err);
+	}
+	return NULL;
 }
 
 #define ERR_PTR(err) __ERR_PTR(err, __FUNCTION__, __LINE__)
@@ -62,8 +65,14 @@ static inline int IS_ERR(const void *ptr)
 int write_chunk(const unsigned char *chunk, unsigned char *digest);
 int read_chunk(unsigned char *chunk, const unsigned char *digest);
 void zero_chunk_digest(unsigned char *digest);
+int random_chunk_digest(unsigned char *digest);
 
 int verify_chunk(const unsigned char *chunk, const unsigned char *digest);
+
+const char *__digest_string(const unsigned char *digest, char *strbuf);
+
+#define digest_string(digest) \
+	__digest_string(digest, alloca(CHUNK_DIGEST_STRLEN + 1))
 
 /*
  * chunk garbage collection.
@@ -106,6 +115,7 @@ struct chunk_tree_operations {
 	void (*free_private)(void *);
 	int (*read_chunk)(unsigned char *chunk, const unsigned char *digest);
 	int (*write_chunk)(const unsigned char *chunk, unsigned char *digest);
+	int (*zero_digest)(struct chunk_tree *ctree, unsigned char *digest);
 };
 
 struct chunk_node {
@@ -138,20 +148,23 @@ int flush_chunk_tree(struct chunk_tree *ctree);
  */
 
 /* I'd like disk_dentry to fit into 256 bytes. */
-#define DDENT_NAME_MAX	(256 - 44)
+#define DDENT_NAME_MAX	(256 - 64)
 
 struct disk_dentry {
-	uint8_t digest[CHUNK_DIGEST_LEN]; // 20
-	uint32_t mode;                    // 24
-	uint64_t size;                    // 32
-	uint32_t ctime;                   // 40
-	uint32_t mtime;                   // 44
-	uint8_t name[DDENT_NAME_MAX];     // 256
+	uint8_t digest[CHUNK_DIGEST_LEN];        // 20
+	uint8_t secret_digest[CHUNK_DIGEST_LEN]; // 40
+	uint32_t mode;                           // 44
+	uint64_t size;                           // 52
+	uint32_t ctime;                          // 60
+	uint32_t mtime;                          // 64
+	uint8_t name[DDENT_NAME_MAX];            // 256
 };
 
 #define namcpy(dst, src)	strcpy((char *)(dst), src)
 #define namcmp(nam, str, len)	strncmp((char *)nam, str, len)
 #define DIRENTS_PER_CHUNK	(CHUNK_SIZE / sizeof(struct disk_dentry))
+
+int init_disk_dentry(struct disk_dentry *ddent);
 
 /*
  * Locking is a bit tricky, as ddent and ddent_cnode
@@ -177,12 +190,14 @@ struct dentry {
 	struct mutex mutex;
 	unsigned ref_count;
 	struct chunk_tree chunk_tree;
+	unsigned char *secret_chunk;
 };
 
 struct dentry *get_nth_dentry(struct dentry *parent, unsigned nr);
 void put_dentry(struct dentry *dentry);
 struct dentry *add_dentry(struct dentry *parent, const char *name, mode_t mode);
 int del_dentry(struct dentry *dentry);
+struct chunk_node *get_dentry_chunk(struct dentry *dentry, unsigned chunk_nr);
 
 struct dentry *find_dentry_parent(const char *path, struct dentry **pparent,
 		const char **name);

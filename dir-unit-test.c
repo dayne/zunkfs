@@ -39,7 +39,9 @@ int main(int argc, char **argv)
 
 	zunkfs_log_fd = stdout;
 
-	zero_chunk_digest(root_ddent.digest);
+	err = init_disk_dentry(&root_ddent);
+	if (err < 0)
+		panic("init_disk_dentry: %s\n", strerror(-err));
 
 	namcpy(root_ddent.name, "/");
 
@@ -52,7 +54,7 @@ int main(int argc, char **argv)
 	if (err)
 		panic("set_root: %s\n", strerror(-err));
 
-	if (1)
+	if (0)
 		test1();
 	if (1)
 		test2();

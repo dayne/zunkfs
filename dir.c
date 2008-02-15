@@ -28,14 +28,6 @@ static inline unsigned dentry_index(const struct dentry *dentry)
 		(struct disk_dentry *)dentry->ddent_cnode->chunk_data;
 }
 
-static int zero_dentry_digest(struct chunk_tree *ctree, unsigned char *digest)
-{
-	const struct dentry *dentry;
-	dentry = container_of(ctree, struct dentry, chunk_tree);
-	memcpy(digest, dentry->ddent->secret_digest, CHUNK_DIGEST_LEN);
-	return 0;
-}
-
 static int read_dentry_chunk(unsigned char *chunk, const unsigned char *digest)
 {
 	const struct chunk_node *cnode;
@@ -83,7 +75,6 @@ static struct chunk_tree_operations dentry_ctree_ops = {
 	.free_private = free,
 	.read_chunk   = read_dentry_chunk,
 	.write_chunk  = write_dentry_chunk,
-	.zero_digest  = zero_dentry_digest
 };
 
 static struct dentry *new_dentry(struct dentry *parent,

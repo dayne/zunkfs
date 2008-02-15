@@ -40,10 +40,6 @@ static struct chunk_node *new_chunk_node(struct chunk_tree *ctree,
 	cnode->dirty = 0;
 	cnode->ref_count = 0;
 
-	err = ctree->ops->read_chunk(cnode->chunk_data, chunk_digest);
-	if (err < 0)
-		goto error;
-
 	return cnode;
 error:
 	free(cnode);
@@ -132,17 +128,23 @@ again:
 			continue;
 
 		digest = parent->chunk_data + path[i] * CHUNK_DIGEST_LEN;
-		if (max_path && max_path[i] != path[i]) {
-			err = ctree->ops->zero_digest(ctree, digest);
-			if (err < 0)
-				return ERR_PTR(-err);
-			parent->dirty = 1;
-		}
 
 		cnode = new_chunk_node(ctree, digest, !i);
 		if (IS_ERR(cnode))
 			return cnode;
 		
+		if (max_path && max_path[i] != path[i]) {
+			memset(cnode->chunk_data, 0, CHUNK_SIZE);
+			cnode->dirty = 1;
+		} else {
+			err = ctree->ops->read_chunk(cnode->chunk_data,
+					cnode->chunk_digest);
+			if (err < 0) {
+				free(cnode);
+				return ERR_PTR(-err);
+			}
+		}
+
 		cnode->parent = parent;
 		children_of(parent)[path[i]] = cnode;
 		parent->ref_count ++;
@@ -220,6 +222,9 @@ void put_chunk_node(struct chunk_node *cnode)
 int init_chunk_tree(struct chunk_tree *ctree, unsigned nr_leafs,
 		unsigned char *root_digest, struct chunk_tree_operations *ops)
 {
+	struct chunk_node *root;
+	int err;
+
 	if (!root_digest)
 		return -EINVAL;
 
@@ -231,11 +236,18 @@ int init_chunk_tree(struct chunk_tree *ctree, unsigned nr_leafs,
 		nr_leafs /= DIGESTS_PER_CHUNK;
 	}
 
-	ctree->root = new_chunk_node(ctree, root_digest, !ctree->height);
-	if (IS_ERR(ctree->root))
-		return -PTR_ERR(ctree->root);
+	root = new_chunk_node(ctree, root_digest, !ctree->height);
+	if (IS_ERR(root))
+		return -PTR_ERR(root);
 
-	ctree->root->ref_count ++;
+	err = ctree->ops->read_chunk(root->chunk_data, root_digest);
+	if (err < 0) {
+		free(root);
+		return err;
+	}
+
+	root->ref_count ++;
+	ctree->root = root;
 
 	return 0;
 }

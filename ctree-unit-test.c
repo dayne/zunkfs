@@ -24,12 +24,6 @@ static const char spaces[] = "                                                  
 static unsigned char rand_digest[CHUNK_DIGEST_LEN];
 static unsigned char rand_chunk[CHUNK_SIZE];
 
-static int test_zero_digest(struct chunk_tree *ctree, unsigned char *digest)
-{
-	memcpy(digest, rand_digest, CHUNK_DIGEST_LEN);
-	return 0;
-}
-
 static int test_read_chunk(unsigned char *chunk, const unsigned char *digest)
 {
 	int i, err;
@@ -66,7 +60,6 @@ struct chunk_tree_operations ctree_ops = {
 	.free_private = free,
 	.read_chunk   = test_read_chunk,
 	.write_chunk  = test_write_chunk,
-	.zero_digest  = test_zero_digest
 };
 
 int main(int argc, char **argv)
@@ -86,7 +79,7 @@ int main(int argc, char **argv)
 	if (err < 0)
 		panic("read_chunk(rand_chunk): %s\n", strerror(-err));
 
-	test_zero_digest(NULL, root_digest);
+	memcpy(root_digest, rand_digest, CHUNK_DIGEST_LEN);
 
 	err = init_chunk_tree(&ctree, 1, root_digest, &ctree_ops);
 	if (err)

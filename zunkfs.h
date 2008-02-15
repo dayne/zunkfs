@@ -115,7 +115,6 @@ struct chunk_tree_operations {
 	void (*free_private)(void *);
 	int (*read_chunk)(unsigned char *chunk, const unsigned char *digest);
 	int (*write_chunk)(const unsigned char *chunk, unsigned char *digest);
-	int (*zero_digest)(struct chunk_tree *ctree, unsigned char *digest);
 };
 
 struct chunk_node {

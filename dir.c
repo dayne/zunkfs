@@ -39,6 +39,12 @@ static int read_dentry_chunk(unsigned char *chunk, const unsigned char *digest)
 
 	assert(dentry->secret_chunk != NULL);
 
+	/*
+	 * Chunk will be empty, so nothing to read.
+	 */
+	if (!dentry->ddent->size)
+		return 0;
+
 	err = read_chunk(chunk, digest);
 	if (err < 0)
 		return err;
@@ -111,14 +117,11 @@ static struct dentry *new_dentry(struct dentry *parent,
 
 int init_disk_dentry(struct disk_dentry *ddent)
 {
-	int err;
-
 	/*
 	 * To properly zero out a dentry chunk, the digest must match 
 	 * the secret digest.
 	 */
-
-	err = random_chunk_digest(ddent->secret_digest);
+	int err = random_chunk_digest(ddent->secret_digest);
 	if (err < 0)
 		return err;
 
@@ -144,7 +147,6 @@ struct chunk_node *get_dentry_chunk(struct dentry *dentry, unsigned chunk_nr)
 		/*
 		 * secret must be read before the root chunk is read.
 		 */
-
 		dentry->secret_chunk = malloc(CHUNK_SIZE);
 		if (!dentry->secret_chunk)
 			return ERR_PTR(ENOMEM);
@@ -413,12 +415,10 @@ static struct dentry *lookup1(struct dentry *parent, const char *name, int len)
 		dentry = __get_nth_dentry(parent, nr);
 		if (IS_ERR(dentry))
 			goto out;
-		if (namcmp(dentry->ddent->name, name, len))
-			continue;
-		if (!dentry->ddent->name[len]) {
-			dentry->ref_count ++;
+		if (!namcmp(dentry->ddent->name, name, len) &&
+				!dentry->ddent->name[len])
 			goto out;
-		}
+		__put_dentry(dentry);
 	}
 
 	dentry = NULL;

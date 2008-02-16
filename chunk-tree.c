@@ -169,7 +169,8 @@ static int flush_chunk_node(struct chunk_node *cnode)
 	int err;
 
 	if (cnode->dirty) {
-		err = cnode->ctree->ops->write_chunk(cnode->chunk_data, cnode->chunk_digest);
+		err = cnode->ctree->ops->write_chunk(cnode->chunk_data,
+				cnode->chunk_digest);
 		if (err < 0)
 			return err;
 		if (cnode->parent)

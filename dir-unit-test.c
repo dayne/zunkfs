@@ -152,6 +152,8 @@ static void test2(void)
 	DIR *dir;
 	struct dirent *de;
 	int n = 0;
+	unsigned max_height = 0;
+	unsigned max_leafs = 0;
 
 	struct dlist {
 		struct dentry *dentry;
@@ -162,9 +164,9 @@ static void test2(void)
 	if (IS_ERR(root))
 		panic("find_dentry(/): %s\n", strerror(PTR_ERR(root)));
 
-	dir = opendir("/lib");
+	dir = opendir("/usr/lib");
 	if (!dir)
-		panic("opendir(/lib'): %s\n", strerror(errno));
+		panic("opendir(/usr/lib'): %s\n", strerror(errno));
 
 	curr = root;
 again:
@@ -198,6 +200,13 @@ again:
 			n ++;
 		}
 	}
+	if (curr->chunk_tree.root) {
+		if (curr->chunk_tree.height > max_height)
+			max_height = curr->chunk_tree.height;
+		if (curr->chunk_tree.nr_leafs > max_leafs)
+			max_leafs = curr->chunk_tree.nr_leafs;
+	}
+
 	//put_dentry(curr);
 	closedir(dir);
 
@@ -207,7 +216,7 @@ again:
 		dlist = d->next;
 		curr = d->dentry;
 		free(d);
-		path = d_path("/lib", curr);
+		path = d_path("/usr/lib", curr);
 		dir = opendir(path);
 		if (!dir)
 			panic("opendir(2, %s): %s\n", path, strerror(errno));
@@ -221,6 +230,8 @@ again:
 	}
 	printf("\n");
 
-	dump_dentry_2(root, indent_start);
+	//dump_dentry_2(root, indent_start);
+	printf("max_height=%u\n",max_height);
+	printf("max_leafs=%u\n",max_leafs);
 }
 

@@ -147,16 +147,16 @@ int flush_chunk_tree(struct chunk_tree *ctree);
  */
 
 /* I'd like disk_dentry to fit into 256 bytes. */
-#define DDENT_NAME_MAX	(256 - 64)
+#define DDENT_NAME_MAX	(256 - 60)
 
 struct disk_dentry {
-	uint8_t digest[CHUNK_DIGEST_LEN];        // 20
-	uint8_t secret_digest[CHUNK_DIGEST_LEN]; // 40
-	uint32_t mode;                           // 44
-	uint64_t size;                           // 52
-	uint32_t ctime;                          // 60
-	uint32_t mtime;                          // 64
-	uint8_t name[DDENT_NAME_MAX];            // 256
+	uint8_t digest[CHUNK_DIGEST_LEN];        // 20 20
+	uint8_t secret_digest[CHUNK_DIGEST_LEN]; // 20 40
+	uint32_t mode;                           //  4 44
+	uint64_t size;                           //  8 52
+	uint32_t ctime;                          //  4 56
+	uint32_t mtime;                          //  4 60
+	uint8_t name[DDENT_NAME_MAX];            // .. 256
 };
 
 #define namcpy(dst, src)	strcpy((char *)(dst), src)

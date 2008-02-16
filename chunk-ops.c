@@ -18,11 +18,16 @@ struct cached_chunk {
 	struct cached_chunk *next;
 	unsigned char chunk_digest[CHUNK_DIGEST_LEN];
 	unsigned char chunk_data[CHUNK_SIZE];
+	struct cached_chunk *next_list;
 };
 
 static struct cached_chunk *chunk_cache[CHUNK_CACHE_SIZE] = {NULL};
 static struct cached_chunk *zero_chunk = NULL;
+static struct cached_chunk *head_chunk = NULL, **tail_chunk = &head_chunk;
+
 static unsigned long nr_chunks = 0;
+static unsigned long nr_reads = 0;
+static unsigned long nr_writes = 0;
 
 static inline unsigned long chunk_index(const unsigned char *digest)
 {
@@ -98,6 +103,10 @@ static struct cached_chunk *cache_chunk(const unsigned char *data,
 
 	nr_chunks ++;
 
+	*tail_chunk = cc;
+	tail_chunk = &cc->next_list;
+	cc->next_list = NULL;
+
 	return cc;
 }
 
@@ -124,6 +133,8 @@ int read_chunk(unsigned char *chunk, const unsigned char *digest)
 {
 	struct cached_chunk *cc;
 
+	nr_reads ++;
+
 	cc = lookup_chunk(digest);
 	if (!cc)
 		return -EIO;
@@ -134,6 +145,8 @@ int read_chunk(unsigned char *chunk, const unsigned char *digest)
 
 int write_chunk(const unsigned char *chunk, unsigned char *digest)
 {
+	nr_writes ++;
+
 	digest_chunk(chunk, digest);
 
 	if (lookup_chunk(digest) || cache_chunk(chunk, digest))
@@ -151,7 +164,25 @@ void zero_chunk_digest(unsigned char *digest)
 
 int random_chunk_digest(unsigned char *digest)
 {
-	int i, chunk_data[INT_CHUNK_SIZE];
+	int i, chunk_data[INT_CHUNK_SIZE] = {0};
+
+	/*
+	 * Cycle thru already existing chunks.
+	 * This saves memory and CPU. Since the first
+	 * few chunks will be random, this should provide
+	 * enough churn for others.
+	 */
+	if (nr_chunks > 10) {
+		struct cached_chunk *cc = head_chunk;
+		head_chunk = cc->next_list;
+
+		*tail_chunk = cc;
+		tail_chunk = &cc->next_list;
+		cc->next_list = NULL;
+
+		memcpy(digest, cc->chunk_digest, CHUNK_DIGEST_LEN);
+		return CHUNK_SIZE;
+	}
 
 	for (i = 0; i < INT_CHUNK_SIZE; i ++)
 		chunk_data[i] = rand();
@@ -179,5 +210,7 @@ static void __attribute__((constructor)) init_chunk_ops(void)
 static void __attribute__((destructor)) fini_chunk_ops(void)
 {
 	fprintf(stderr, "nr_chunks: %lu\n", nr_chunks);
+	fprintf(stderr, "nr_reads: %lu\n", nr_reads);
+	fprintf(stderr, "nr_writes: %lu\n", nr_writes);
 }
 

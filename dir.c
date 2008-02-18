@@ -99,11 +99,10 @@ static struct dentry *new_dentry(struct dentry *parent,
 	dentry->ddent_cnode = ddent_cnode;
 	dentry->ddent_mutex = ddent_mutex;
 	dentry->parent = parent;
-	dentry->ref_count = 0;
-	dentry->chunk_tree.root = NULL;
-	dentry->secret_chunk = NULL;
-
 	init_mutex(&dentry->mutex);
+	dentry->ref_count = 0;
+	memset(&dentry->chunk_tree, 0, sizeof(struct chunk_tree));
+	dentry->secret_chunk = NULL;
 
 	if (parent) {
 		locked_inc(&parent->ref_count, parent->ddent_mutex);

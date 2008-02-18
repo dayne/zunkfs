@@ -133,6 +133,11 @@ read_again3:
 		offset += m;
 	}
 
+	printf("size=%llu nr_leafs=%u height=%u\n",
+			ofile->dentry->ddent->size,
+			ofile->dentry->chunk_tree.nr_leafs,
+			ofile->dentry->chunk_tree.height);
+
 	err = close_file(ofile);
 	if (err < 0)
 		panic("close_file: %s\n", strerror(-err));

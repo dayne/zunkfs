@@ -24,15 +24,6 @@
 #define dentry_array(cnode) \
 	((struct dentry **)(cnode)->_private)
 
-void dump_digest(const unsigned char *digest)
-{
-	int j;
-	for (j = 0; j < CHUNK_DIGEST_LEN; j ++) {
-		unsigned char v = digest[j];
-		printf("%02x", v);
-	}
-}
-
 void dump_cnode(struct chunk_node *cnode, const char *indent, int height,
 		void (*dump_leaf)(void **, const char *))
 {
@@ -41,8 +32,8 @@ void dump_cnode(struct chunk_node *cnode, const char *indent, int height,
 	if (!cnode)
 		return;
 
-	printf("%s%p:%p: ", indent, cnode, cnode->chunk_digest);
-	dump_digest(cnode->chunk_digest);
+	printf("%s%p:%p: %s", indent, cnode, cnode->chunk_digest,
+			digest_string(cnode->chunk_digest));
 	if (cnode->dirty)
 		printf(" [dirty]");
 	else if (!verify_chunk(cnode->chunk_data, cnode->chunk_digest))

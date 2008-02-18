@@ -353,7 +353,7 @@ static void swap_dentries(struct dentry *a, struct dentry *b)
 
 int del_dentry(struct dentry *dentry)
 {
-	struct dentry *parent;
+	struct dentry *parent = NULL;
 	struct dentry *tmp = NULL;
 	int err;
 

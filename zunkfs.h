@@ -39,6 +39,7 @@ extern void *const __errbuf;
 
 #define MAX_ERRNO	256
 
+#ifndef NDEBUG
 static inline void *__ERR_PTR(int err, const char *funct, int line)
 {
 	if (err > 0 && err < MAX_ERRNO) {
@@ -48,12 +49,27 @@ static inline void *__ERR_PTR(int err, const char *funct, int line)
 	return NULL;
 }
 
+static inline int __PTR_ERR(const void *ptr, const char *funct, int line)
+{
+	int err = (ptr - __errbuf);
+	if (err > 0 && err < MAX_ERRNO)
+		zprintf('E', funct, line, "%s\n", strerror(err));
+	return err;
+}
+
 #define ERR_PTR(err) __ERR_PTR(err, __FUNCTION__, __LINE__)
+#define PTR_ERR(ptr) __PTR_ERR(ptr, __FUNCTION__, __LINE__)
+#else
+static inline void *ERR_PTR(int err)
+{
+	return (void *)(__errbuf + err);
+}
 
 static inline int PTR_ERR(const void  *ptr)
 {
 	return ptr - __errbuf;
 }
+#endif
 
 static inline int IS_ERR(const void *ptr)
 {

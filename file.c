@@ -155,6 +155,9 @@ static int rw_file(struct open_file *ofile, char *buf, size_t bufsz,
 		}
 		len += cplen;
 		cache_file_chunk(ofile, cnode);
+
+		chunk_nr ++;
+		chunk_off = 0;
 	}
 
 	if (!read) {

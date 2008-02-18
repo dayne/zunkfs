@@ -150,11 +150,9 @@ struct chunk_node *get_dentry_chunk(struct dentry *dentry, unsigned chunk_nr)
 		dentry->secret_chunk = malloc(CHUNK_SIZE);
 		if (!dentry->secret_chunk)
 			return ERR_PTR(ENOMEM);
-
 		err = read_chunk(dentry->secret_chunk, dentry->ddent->secret_digest);
 		if (err < 0)
 			return ERR_PTR(-err);
-		
 		err = init_chunk_tree(&dentry->chunk_tree,
 				ddent_chunk_count(dentry->ddent),
 				dentry->ddent->digest, &dentry_ctree_ops);
@@ -243,6 +241,9 @@ static void free_dentry(struct dentry *dentry)
 	if (dentry->chunk_tree.root) {
 		assert(dentry->secret_chunk != NULL);
 		free(dentry->secret_chunk);
+		if (dentry->chunk_tree.root->dirty)
+			dentry->ddent_cnode->dirty = 1;
+
 		free_chunk_tree(&dentry->chunk_tree);
 	}
 
@@ -488,6 +489,25 @@ int set_root(struct disk_dentry *ddent, struct mutex *ddent_mutex)
 out:
 	unlock(ddent_mutex);
 	return 0;
+}
+
+struct dentry *create_dentry(const char *path, mode_t mode)
+{
+	struct dentry *dentry;
+	struct dentry *parent;
+	const char *name;
+
+	dentry = find_dentry_parent(path, &parent, &name);
+	if (IS_ERR(dentry))
+		return dentry;
+	if (dentry) {
+		put_dentry(parent);
+		put_dentry(dentry);
+		return ERR_PTR(EEXIST);
+	}
+	dentry = add_dentry(parent, name, mode);
+	put_dentry(parent);
+	return dentry;
 }
 
 static void __attribute__((constructor)) dir_ctor(void)

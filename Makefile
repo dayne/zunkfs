@@ -8,7 +8,7 @@ CFLAGS+=-DCHUNK_SIZE=$(CHUNK_SIZE)
 endif
 
 CORE_OBJS=chunk-tree.o \
-	  chunk-ops.o \
+	  chunk-db.o \
 	  dir.o \
 	  file.o \
 	  utils.o
@@ -34,5 +34,5 @@ file-unit-test: $(UNIT_TEST_OBJS) file-unit-test.o
 	$(CC) $(CFLAGS) -o $@ $^  $(LDFLAGS)
 
 clean:
-	@rm -f $(FINAL_OBJS) *.o *.out *.log
+	@rm -f $(FINAL_OBJS) *.o *.out *.log core
 

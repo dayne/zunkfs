@@ -27,39 +27,19 @@
 static const char spaces[] = "                                                                                                                                                               ";
 #define indent_start (spaces + sizeof(spaces) - 1)
 
-int main(int argc, char **argv)
+void test_import(char *path)
 {
-	struct disk_dentry root_ddent;
-	DECLARE_MUTEX(root_mutex);
 	loff_t offset;
 	int fd, err;
-
 	struct open_file *ofile;
 
-	zunkfs_log_fd = stdout;
-
-	err = init_disk_dentry(&root_ddent);
-	if (err < 0)
-		panic("init_disk_dentry: %s\n", strerror(-err));
-
-	namcpy(root_ddent.name, "/");
-
-	root_ddent.mode = S_IFDIR | S_IRWXU;
-	root_ddent.size = 0;
-	root_ddent.ctime = time(NULL);
-	root_ddent.mtime = time(NULL);
-
-	err = set_root(&root_ddent, &root_mutex);
-	if (err)
-		panic("set_root: %s\n", strerror(-err));
-
-	fd = open(argv[1], O_RDONLY);
+	fd = open(path, O_RDONLY);
 	if (fd < 0)
-		panic("open %s: %s\n", argv[1], strerror(errno));
+		panic("open %s: %s\n", path, strerror(errno));
 
-	fprintf(stderr, "importing %s\n", argv[1]);
+	fprintf(stderr, "importing %s\n", path);
 
-	ofile = create_file(basename(argv[1]), 0700);
+	ofile = create_file(basename(path), 0700);
 	if (IS_ERR(ofile))
 		panic("create_file: %s\n", strerror(PTR_ERR(ofile)));
 
@@ -70,7 +50,7 @@ read_again:
 		n = read(fd, buf, sizeof(buf));
 		if (n < 0) {
 			if (errno != EINTR)
-				panic("read %s: %s\n", argv[1], strerror(errno));
+				panic("read %s: %s\n", path, strerror(errno));
 			goto read_again;
 		}
 		if (!n)
@@ -96,7 +76,7 @@ write_again:
 	if (err < 0)
 		panic("close_file: %s\n", strerror(-err));
 
-	ofile = open_file(basename(argv[1]));
+	ofile = open_file(basename(path));
 	if (IS_ERR(ofile))
 		panic("open_file: %s\n", strerror(-err));
 
@@ -114,7 +94,7 @@ read_again2:
 		n = read(fd, buf, sizeof(buf));
 		if (n < 0) {
 			if (errno != EINTR)
-				panic("read %s: %s\n", argv[1], strerror(errno));
+				panic("read %s: %s\n", path, strerror(errno));
 			goto read_again2;
 		}
 		if (!n)
@@ -141,6 +121,35 @@ read_again3:
 	err = close_file(ofile);
 	if (err < 0)
 		panic("close_file: %s\n", strerror(-err));
+
+	close(fd);
+}
+
+int main(int argc, char **argv)
+{
+	struct disk_dentry root_ddent;
+	DECLARE_MUTEX(root_mutex);
+	int i, err;
+
+	zunkfs_log_fd = stdout;
+
+	err = init_disk_dentry(&root_ddent);
+	if (err < 0)
+		panic("init_disk_dentry: %s\n", strerror(-err));
+
+	namcpy(root_ddent.name, "/");
+
+	root_ddent.mode = S_IFDIR | S_IRWXU;
+	root_ddent.size = 0;
+	root_ddent.ctime = time(NULL);
+	root_ddent.mtime = time(NULL);
+
+	err = set_root(&root_ddent, &root_mutex);
+	if (err)
+		panic("set_root: %s\n", strerror(-err));
+
+	for (i = 1; i < argc; i ++)
+		test_import(argv[i]);
 
 	return 0;
 }

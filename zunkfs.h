@@ -201,12 +201,33 @@ struct chunk_node *get_dentry_chunk(struct dentry *dentry, unsigned chunk_nr);
 struct dentry *find_dentry_parent(const char *path, struct dentry **pparent,
 		const char **name);
 
+struct dentry *create_dentry(const char *path, mode_t mode);
+
 static inline struct dentry *find_dentry(const char *path)
 {
 	return find_dentry_parent(path, NULL, NULL) ?: ERR_PTR(ENOENT);
 }
 
 int set_root(struct disk_dentry *ddent, struct mutex *ddent_mutex);
+
+/* 
+ * Open files.
+ */
+
+#define FILE_CHUNK_CACHE_SIZE	5
+
+struct open_file {
+	struct dentry *dentry;
+	struct chunk_node *ccache[FILE_CHUNK_CACHE_SIZE];
+	unsigned ccache_index;
+};
+
+struct open_file *open_file(const char *path);
+struct open_file *create_file(const char *path, mode_t mode);
+int close_file(struct open_file *ofile);
+int flush_file(struct open_file *ofile);
+int read_file(struct open_file *ofile, char *buf, size_t bufsz, off_t offset);
+int write_file(struct open_file *ofile, const char *buf, size_t len, off_t off);
 
 /*
  * Misc...

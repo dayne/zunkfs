@@ -10,6 +10,7 @@ endif
 CORE_OBJS=chunk-tree.o \
 	  chunk-ops.o \
 	  dir.o \
+	  file.o \
 	  utils.o
 
 UNIT_TEST_OBJS=$(CORE_OBJS) unit-test-utils.o
@@ -18,7 +19,7 @@ FINAL_OBJS=zunkfs ctree-unit-test dir-unit-test
 
 all: zunkfs 
 
-tests: ctree-unit-test dir-unit-test
+tests: ctree-unit-test dir-unit-test file-unit-test
 
 zunkfs: $(CORE_OBJS) fuse.o
 	$(CC) -o $@ $^ $(LDFLAGS) #-lsqlite3
@@ -29,6 +30,8 @@ ctree-unit-test: $(UNIT_TEST_OBJS) ctree-unit-test.o
 dir-unit-test: $(UNIT_TEST_OBJS) dir-unit-test.o
 	$(CC) $(CFLAGS) -o $@ $^  $(LDFLAGS)
 
+file-unit-test: $(UNIT_TEST_OBJS) file-unit-test.o
+	$(CC) $(CFLAGS) -o $@ $^  $(LDFLAGS)
 
 clean:
 	@rm -f $(FINAL_OBJS) *.o *.out *.log

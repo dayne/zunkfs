@@ -230,7 +230,13 @@ int set_root(struct disk_dentry *ddent, struct mutex *ddent_mutex);
  * Open files.
  */
 
-#define FILE_CHUNK_CACHE_SIZE	5
+#define MIN_FILE_CHUNK_CACHE_SIZE	16
+
+#if CHUNK_SIZE > 4096
+#define FILE_CHUNK_CACHE_SIZE	(MIN_FILE_CHUNK_CACHE_SIZE * CHUNK_SIZE / 4096)
+#else
+#define FILE_CHUNK_CACHE_SIZE	MIN_FILE_CHUNK_CACHE_SIZE
+#endif
 
 struct open_file {
 	struct dentry *dentry;

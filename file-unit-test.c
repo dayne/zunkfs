@@ -14,6 +14,7 @@
 #include <unistd.h>
 
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/types.h>
 
 #include "zunkfs.h"
@@ -32,6 +33,9 @@ void test_import(char *path)
 	loff_t offset;
 	int fd, err;
 	struct open_file *ofile;
+	struct timeval start, end, delta;
+
+	gettimeofday(&start, NULL);
 
 	fd = open(path, O_RDONLY);
 	if (fd < 0)
@@ -80,6 +84,12 @@ write_again:
 	if (IS_ERR(ofile))
 		panic("open_file: %s\n", strerror(-err));
 
+	gettimeofday(&end, NULL);
+	timersub(&end, &start, &delta);
+	start = end;
+
+	printf("time to import: %lu.%06lu\n", delta.tv_sec, delta.tv_usec);
+
 	fprintf(stderr, "verifying...\n");
 	err = lseek(fd, 0, SEEK_SET);
 	assert(err == 0);
@@ -123,6 +133,11 @@ read_again3:
 		panic("close_file: %s\n", strerror(-err));
 
 	close(fd);
+
+	gettimeofday(&end, NULL);
+	timersub(&end, &start, &delta);
+
+	printf("time to verify: %lu.%06lu\n", delta.tv_sec, delta.tv_usec);
 }
 
 int main(int argc, char **argv)

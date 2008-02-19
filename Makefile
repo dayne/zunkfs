@@ -1,6 +1,6 @@
 FUSE_CFLAGS=$(shell pkg-config fuse --cflags) -D_FILE_OFFSET_BITS=64
 FUSE_LIBS=$(shell pkg-config fuse --libs)
-CFLAGS=-g -Wall $(FUSE_CFLAGS)
+CFLAGS=-O2 -DNDEBUG -g -Wall $(FUSE_CFLAGS)
 LDFLAGS=-lssl $(FUSE_LIBS)
 
 ifdef CHUNK_SIZE
@@ -15,9 +15,9 @@ CORE_OBJS=chunk-tree.o \
 
 UNIT_TEST_OBJS=$(CORE_OBJS) unit-test-utils.o
 
-FINAL_OBJS=zunkfs ctree-unit-test dir-unit-test
+FINAL_OBJS=zunkfs ctree-unit-test dir-unit-test file-unit-test
 
-all: zunkfs 
+all: ${FINAL_OBJS}
 
 tests: ctree-unit-test dir-unit-test file-unit-test
 

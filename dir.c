@@ -490,6 +490,16 @@ out:
 	return 0;
 }
 
+void flush_root(void)
+{
+	assert(root_dentry != NULL);
+
+	lock(&root_dentry->mutex);
+	if (root_dentry->chunk_tree.root)
+		flush_chunk_tree(&root_dentry->chunk_tree);
+	unlock(&root_dentry->mutex);
+}
+
 struct dentry *create_dentry(const char *path, mode_t mode)
 {
 	struct dentry *dentry;

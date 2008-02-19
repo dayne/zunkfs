@@ -1,6 +1,6 @@
 FUSE_CFLAGS=$(shell pkg-config fuse --cflags) -D_FILE_OFFSET_BITS=64
 FUSE_LIBS=$(shell pkg-config fuse --libs)
-CFLAGS=-O2 -DNDEBUG -g -Wall $(FUSE_CFLAGS)
+CFLAGS=-g -Wall $(FUSE_CFLAGS)
 LDFLAGS=-lssl $(FUSE_LIBS)
 
 ifdef CHUNK_SIZE

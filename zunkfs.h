@@ -225,6 +225,7 @@ static inline struct dentry *find_dentry(const char *path)
 }
 
 int set_root(struct disk_dentry *ddent, struct mutex *ddent_mutex);
+void flush_root(void);
 
 /* 
  * Open files.

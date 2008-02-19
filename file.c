@@ -67,7 +67,7 @@ struct open_file *create_file(const char *path, mode_t mode)
 
 int close_file(struct open_file *ofile)
 {
-	unsigned i, retv;
+	unsigned i, retv = 0;
 
 	lock_file(ofile);
 	for (i = 0; i < FILE_CHUNK_CACHE_SIZE; i ++) {
@@ -76,7 +76,8 @@ int close_file(struct open_file *ofile)
 		put_chunk_node(ofile->ccache[i]);
 		ofile->ccache[i] = NULL;
 	}
-	retv = flush_chunk_tree(&ofile->dentry->chunk_tree);
+	if (ofile->dentry->chunk_tree.root)
+		retv = flush_chunk_tree(&ofile->dentry->chunk_tree);
 	unlock_file(ofile);
 
 	put_dentry(ofile->dentry);
@@ -89,7 +90,7 @@ int close_file(struct open_file *ofile)
 
 int flush_file(struct open_file *ofile)
 {
-	unsigned i, retv;
+	unsigned i, retv = 0;
 
 	lock_file(ofile);
 	for (i = 0; i < FILE_CHUNK_CACHE_SIZE; i ++) {
@@ -98,7 +99,8 @@ int flush_file(struct open_file *ofile)
 		put_chunk_node(ofile->ccache[i]);
 		ofile->ccache[i] = NULL;
 	}
-	retv = flush_chunk_tree(&ofile->dentry->chunk_tree);
+	if (ofile->dentry->chunk_tree.root)
+		retv = flush_chunk_tree(&ofile->dentry->chunk_tree);
 	unlock_file(ofile);
 
 	return retv;

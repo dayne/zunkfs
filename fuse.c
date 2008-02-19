@@ -18,6 +18,7 @@
 #include <ctype.h>
 #include <stdarg.h>
 #include <pthread.h>
+#include <sys/mman.h>
 
 #include "zunkfs.h"
 
@@ -87,6 +88,7 @@ static int zunkfs_readdir(const char *path, void *filldir_buf,
 				err = 0;
 			goto out;
 		}
+		TRACE("%s\n", (char *)child->ddent->name);
 		if (filldir(filldir_buf, (char *)child->ddent->name, NULL, 0)) {
 			err = -ENOBUFS;
 			put_dentry(child);
@@ -218,6 +220,37 @@ static int zunkfs_unlink(const char *path)
 	return err;
 }
 
+static int zunkfs_rmdir(const char *path)
+{
+	struct dentry *dentry;
+	int err;
+
+	TRACE("%s\n", path);
+
+	dentry = find_dentry(path);
+	if (IS_ERR(dentry))
+		return -PTR_ERR(dentry);
+
+	err = -ENOTDIR;
+	if (!S_ISDIR(dentry->ddent->mode))
+		goto out;
+
+	err = -EBUSY;
+	if (dentry->ddent->size)
+		put_dentry(dentry);
+
+	err = del_dentry(dentry);
+out:
+	put_dentry(dentry);
+	return err;
+}
+
+static int zunkfs_utimens(const char *path, const struct timespec tv[2])
+{
+	TRACE("%s\n", path);
+	return 0;
+}
+
 static struct fuse_operations zunkfs_operations = {
 	.getattr	= zunkfs_getattr,
 	.readdir	= zunkfs_readdir,
@@ -229,16 +262,48 @@ static struct fuse_operations zunkfs_operations = {
 	.create		= zunkfs_create,
 	.flush		= zunkfs_flush,
 	.unlink		= zunkfs_unlink,
+	.utimens	= zunkfs_utimens,
+	.rmdir		= zunkfs_rmdir,
 };
+
+static void usage(const char *argv0)
+{
+	fprintf(stderr, "%s: [-l|--log <file>] root\n", basename(argv0));
+	exit(1);
+}
 
 int main(int argc, char **argv)
 {
-	struct disk_dentry root_ddent;
+	struct disk_dentry *root_ddent;
 	DECLARE_MUTEX(root_mutex);
-	char *log_file;
-	int err;
+	char *fs_descr = NULL;
+	char *log_file = NULL;
+	int fd, err;
 
+	fs_descr = getenv("ZUNKFS_SUPER");
 	log_file = getenv("ZUNKFS_LOG");
+#if 0
+	for (i = 1; i < argc; i ++) {
+		if (!strcmp(argv[i], "-l") || !strcmp(argv[i], "--log")) {
+			if (argc - i < 2 || log_file)
+				usage(argv[0]);
+			log_file = strdup(argv[i + 1]);
+			assert(log_file != NULL);
+			memmove(argv[i], argv[i + 2], (argc - (i + 1)) * sizeof(char *));
+			i --;
+			argc -= 2;
+		} else if (argv[i][0] != '-') {
+			if (fs_descr)
+				continue;
+			fs_descr = strdup(argv[i]);
+			assert(fs_descr != NULL);
+			memmove(argv[i], argv[i + 1], (argc - i) * sizeof(char *));
+			i --;
+			argc --;
+		}
+	}
+#endif
+
 	if (log_file) {
 		if (!strcmp(log_file, "stderr"))
 			zunkfs_log_fd = stderr;
@@ -248,28 +313,51 @@ int main(int argc, char **argv)
 			zunkfs_log_fd = fopen(log_file, "w");
 	}
 
-	// FIXME: smarter root?
+	if (!fs_descr)
+		usage(argv[0]);
 
-	namcpy(root_ddent.name, "/");
-	root_ddent.mode = S_IFDIR | S_IRWXU;
-	root_ddent.size = 0;
-	root_ddent.ctime = time(NULL);
-	root_ddent.mtime = time(NULL);
-
-	err = random_chunk_digest(root_ddent.secret_digest);
-	if (err < 0) {
-		ERROR("random_chunk_digest: %s\n", strerror(-err));
+	fd = open(fs_descr, O_RDWR|O_CREAT, 0600);
+	if (fd < 0) {
+		ERROR("open(%s): %s\n", fs_descr, strerror(errno));
 		exit(-1);
 	}
 
-	memcpy(root_ddent.digest, root_ddent.secret_digest, CHUNK_DIGEST_LEN);
+	root_ddent = mmap(NULL, 4096, PROT_READ|PROT_WRITE,
+			MAP_SHARED|MAP_POPULATE, fd, 0);
+	if (root_ddent == MAP_FAILED) {
+		ERROR("mmap(%s): %s\n", fs_descr, strerror(errno));
+		exit(-2);
+	}
 
-	err = set_root(&root_ddent, &root_mutex);
+	if (root_ddent->name[0] == '\0') {
+		namcpy(root_ddent->name, "/");
+
+		root_ddent->mode = S_IFDIR | S_IRWXU;
+		root_ddent->size = 0;
+		root_ddent->ctime = time(NULL);
+		root_ddent->mtime = time(NULL);
+
+		err = random_chunk_digest(root_ddent->secret_digest);
+		if (err < 0) {
+			ERROR("random_chunk_digest: %s\n", strerror(-err));
+			exit(-3);
+		}
+
+		memcpy(root_ddent->digest, root_ddent->secret_digest, CHUNK_DIGEST_LEN);
+
+	} else if (root_ddent->name[0] != '/' || root_ddent->name[1]) {
+		ERROR("Bad superblock.\n");
+		exit(-3);
+	}
+
+	err = set_root(root_ddent, &root_mutex);
 	if (err) {
 		ERROR("Failed to set root: %s\n", strerror(-err));
-		exit(-1);
+		exit(-4);
 	}
 
-	return fuse_main(argc, argv, &zunkfs_operations, NULL);
+	err = fuse_main(argc, argv, &zunkfs_operations, NULL);
+	flush_root();
+	return err;
 }
 

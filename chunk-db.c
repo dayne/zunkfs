@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <limits.h>
 
 #include <openssl/sha.h>
 #include <sys/stat.h>
@@ -18,6 +19,7 @@
 
 static unsigned long nr_reads = 0;
 static unsigned long nr_writes = 0;
+static char chunk_dir[PATH_MAX];
 
 static inline int cmp_digest(const unsigned char *a, const unsigned char *b)
 {
@@ -63,7 +65,7 @@ int read_chunk(unsigned char *chunk, const unsigned char *digest)
 
 	nr_reads ++;
 
-	err = asprintf(&path, ".chunks/%s", digest_string(digest));
+	err = asprintf(&path, "%s/%s", chunk_dir, digest_string(digest));
 	if (err < 0)
 		return -errno;
 
@@ -111,7 +113,7 @@ int write_chunk(const unsigned char *chunk, unsigned char *digest)
 
 	digest_chunk(chunk, digest);
 
-	err = asprintf(&path, ".chunks/%s", digest_string(digest));
+	err = asprintf(&path, "%s/%s", chunk_dir, digest_string(digest));
 	if (err < 0)
 		return -errno;
 
@@ -157,9 +159,14 @@ int random_chunk_digest(unsigned char *digest)
 
 static void __attribute__((constructor)) init_chunk_ops(void)
 {
+	char cwd[PATH_MAX];
 	int err;
 
-	err = mkdir(".chunks", S_IRWXU);
+	err = snprintf(chunk_dir, PATH_MAX, "%s/.chunks",
+			getcwd(cwd, PATH_MAX));
+	assert(err < PATH_MAX);
+
+	err = mkdir(chunk_dir, S_IRWXU);
 	if (err < 0 && errno != EEXIST) {
 		PANIC("Failed to create .chunks directory: %s\n",
 				strerror(errno));

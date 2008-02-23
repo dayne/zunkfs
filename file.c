@@ -17,6 +17,9 @@
 #define lock_file(of)  lock(&(of)->dentry->mutex)
 #define unlock_file(of)  unlock(&(of)->dentry->mutex)
 
+#define lock_file_metadata(of) lock((of)->dentry->ddent_mutex)
+#define unlock_file_metadata(of) unlock((of)->dentry->ddent_mutex)
+
 static struct open_file *open_file_dentry(struct dentry *dentry)
 {
 	struct open_file *ofile;
@@ -127,6 +130,9 @@ static int rw_file(struct open_file *ofile, char *buf, size_t bufsz,
 	uint64_t file_size;
 	int len, cplen;
 
+	/*
+	 * size won't change w/out dentry mutex.
+	 */
 	file_size = ofile->dentry->ddent->size;
 	if (offset > file_size)
 		return -EINVAL;
@@ -163,10 +169,12 @@ static int rw_file(struct open_file *ofile, char *buf, size_t bufsz,
 	}
 
 	if (!read) {
+		lock_file_metadata(ofile);
 		if ((len + offset) > file_size)
 			ofile->dentry->ddent->size = len + offset;
 		ofile->dentry->ddent->mtime = time(NULL);
 		ofile->dentry->ddent_cnode->dirty = 1;
+		unlock_file_metadata(ofile);
 	}
 
 	return len;

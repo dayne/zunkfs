@@ -48,6 +48,8 @@ static int zunkfs_getattr(const char *path, struct stat *stbuf)
 	stbuf->st_atime = ddent->mtime;
 	stbuf->st_mtime = ddent->mtime;
 	stbuf->st_ctime = ddent->ctime;
+	stbuf->st_blksize = 4096;
+	stbuf->st_blocks = (ddent->size + 4095) / 4096;
 
 	unlock(dentry->ddent_mutex);
 	put_dentry(dentry);
@@ -61,6 +63,7 @@ static int zunkfs_readdir(const char *path, void *filldir_buf,
 {
 	struct dentry *dentry;
 	struct dentry *child;
+	struct dentry *prev;
 	unsigned i;
 	int err;
 
@@ -80,6 +83,7 @@ static int zunkfs_readdir(const char *path, void *filldir_buf,
 		goto out;
 
 	/* racy, but should be OK */
+	prev = NULL;
 	for (i = 0; ; i ++) {
 		child = get_nth_dentry(dentry, i);
 		if (IS_ERR(child)) {
@@ -94,9 +98,13 @@ static int zunkfs_readdir(const char *path, void *filldir_buf,
 			put_dentry(child);
 			goto out;
 		}
-		put_dentry(child);
+		if (prev)
+			put_dentry(prev);
+		prev = child;
 	}
 out:
+	if (prev)
+		put_dentry(prev);
 	put_dentry(dentry);
 	return err;
 }
@@ -247,7 +255,22 @@ out:
 
 static int zunkfs_utimens(const char *path, const struct timespec tv[2])
 {
+	struct dentry *dentry;
+
 	TRACE("%s\n", path);
+
+	dentry = find_dentry(path);
+	if (IS_ERR(dentry))
+		return -PTR_ERR(dentry);
+
+	lock(dentry->ddent_mutex);
+	if (dentry->ddent->mtime != tv[1].tv_sec) {
+		dentry->ddent->mtime = tv[1].tv_sec;
+		dentry->ddent_cnode->dirty = 1;
+	}
+	unlock(dentry->ddent_mutex);
+	put_dentry(dentry);
+
 	return 0;
 }
 

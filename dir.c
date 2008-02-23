@@ -394,6 +394,7 @@ out:
 
 static struct dentry *lookup1(struct dentry *parent, const char *name, int len)
 {
+	struct dentry *prev = NULL;
 	struct dentry *dentry;
 	unsigned nr;
 
@@ -418,11 +419,15 @@ static struct dentry *lookup1(struct dentry *parent, const char *name, int len)
 		if (!namcmp(dentry->ddent->name, name, len) &&
 				!dentry->ddent->name[len])
 			goto out;
-		__put_dentry(dentry);
+		if (prev)
+			__put_dentry(prev);
+		prev = dentry;
 	}
 
 	dentry = NULL;
 out:
+	if (prev)
+		__put_dentry(prev);
 	unlock(&parent->mutex);
 	return dentry;
 }

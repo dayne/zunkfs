@@ -122,8 +122,19 @@ static inline int have_mutex(const struct mutex *m)
 	return m->owner == pthread_self();
 }
 
-void locked_inc(unsigned *v, struct mutex *m);
-void locked_dec(unsigned *v, struct mutex *m);
+#define locked_inc(value, mutex) do { \
+	lock(mutex); \
+	++ *(value); \
+	assert(*(value) != 0); \
+	unlock(mutex); \
+} while(0)
+
+#define locked_dec(value, mutex) do { \
+	lock(mutex); \
+	assert(*(value) != 0); \
+	-- *(value); \
+	unlock(mutex); \
+} while(0)
 
 struct chunk_tree;
 

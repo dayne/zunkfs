@@ -93,19 +93,3 @@ int trylock(struct mutex *m)
 	return !err;
 }
 
-void locked_inc(unsigned *v, struct mutex *m)
-{
-	lock(m);
-	++*v;
-	assert(*v != 0);
-	unlock(m);
-}
-
-void locked_dec(unsigned *v, struct mutex *m)
-{
-	lock(m);
-	assert(*v != 0);
-	--*v;
-	unlock(m);
-}
-

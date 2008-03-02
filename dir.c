@@ -617,8 +617,23 @@ static int __rename_dentry(struct dentry *dentry, const char *new_name,
 
 		lock(&old_parent->mutex);
 		err = make_last_dentry(dentry, old_parent);
-		if (err)
-			goto out;
+		if (err) {
+			unlock(&old_parent->mutex);
+			unlock(&new_parent->mutex);
+			return err;
+		}
+
+		swap_dentries(shadow, dentry);
+		namcpy(dentry->ddent->name, new_name);
+		__del_dentry(shadow, old_parent);
+		unlock(&old_parent->mutex);
+
+		locked_inc(&new_parent->ddent->size, new_parent->ddent_mutex);
+		unlock(&new_parent->mutex);
+
+		put_dentry(shadow);
+		return 0;
+
 	} else {
 		lock(&old_parent->mutex);
 		err = make_last_dentry(dentry, old_parent);
@@ -626,49 +641,26 @@ static int __rename_dentry(struct dentry *dentry, const char *new_name,
 			unlock(&old_parent->mutex);
 			return err;
 		}
+
 		lock(&new_parent->mutex);
 		shadow = __get_nth_dentry(new_parent, new_parent->ddent->size);
 		if (IS_ERR(shadow)) {
-			err = -PTR_ERR(shadow);
-			goto out;
+			unlock(&old_parent->mutex);
+			unlock(&new_parent->mutex);
+			return -PTR_ERR(shadow);
 		}
-	}
 
-	swap_dentries(shadow, dentry);
+		swap_dentries(shadow, dentry);
+		namcpy(dentry->ddent->name, new_name);
+		locked_inc(&new_parent->ddent->size, new_parent->ddent_mutex);
+		unlock(&new_parent->mutex);
 
-	namcpy(dentry->ddent->name, new_name);
-
-	/*
-	 * Shadow is now the last entry in old_parent,
-	 * and old_parent is already locked, we can 
-	 * safely free shadow. 
-	 */
-	__del_dentry(shadow, old_parent);
-
-	/*
-	 * Unlock old_parent, as put_dentry(shadow) needs
-	 * to lock it, and may drop old_parent's ref_count
-	 * to 0. So old_parent will may not be valid later.
-	 */
-	unlock(&old_parent->mutex);
-	put_dentry(shadow);
-	old_parent = NULL;
-
-	/*
-	 * As old_parent may be new_parent's parent,
-	 * we can't lock new_parent->ddent_mutex until here.
-	 * But note that ddent->size is protected by both
-	 * ->mutex and ->ddent_mutex.
-	 */
-	lock(new_parent->ddent_mutex);
-	new_parent->ddent->size ++;
-	unlock(new_parent->ddent_mutex);
-
-out:
-	unlock(&new_parent->mutex);
-	if (old_parent)
+		__del_dentry(shadow, old_parent);
 		unlock(&old_parent->mutex);
-	return err;
+
+		put_dentry(shadow);
+		return 0;
+	}
 }
 
 int rename_dentry(struct dentry *dentry, const char *new_name,

@@ -30,6 +30,8 @@ void __zprintf(char level, const char *function, int line, const char *fmt, ...)
 		abort();
 
 	lock(&log_mutex);
+	if (zunkfs_log_fd == stderr)
+		fflush(stdout);
 	fprintf(zunkfs_log_fd, "%lx %s %s:%d: ",
 			((unsigned long)pthread_self()) >> 8,
 			level_str, function, line);

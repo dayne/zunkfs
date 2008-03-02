@@ -330,15 +330,26 @@ static void swap_dentries(struct dentry *a, struct dentry *b)
 	struct disk_dentry *ddent;
 	struct disk_dentry tmp_ddent;
 	struct chunk_node *cnode;
+	struct mutex *ddent_mutex;
+	struct dentry *parent;
+
+	assert(have_mutex(a->ddent_mutex));
+	assert(have_mutex(b->ddent_mutex));
 
 	ddent = a->ddent;
 	cnode = a->ddent_cnode;
+	parent = a->parent;
+	ddent_mutex = a->ddent_mutex;
 
 	a->ddent = b->ddent;
 	a->ddent_cnode = b->ddent_cnode;
+	a->parent = b->parent;
+	a->ddent_mutex = b->ddent_mutex;
 
 	b->ddent = ddent;
 	b->ddent_cnode = cnode;
+	b->parent = parent;
+	b->ddent_mutex = ddent_mutex;
 
 	dentry_ptr(a) = a;
 	dentry_ptr(b) = b;
@@ -351,30 +362,26 @@ static void swap_dentries(struct dentry *a, struct dentry *b)
 	b->ddent_cnode->dirty = 1;
 }
 
-int del_dentry(struct dentry *dentry)
+static int make_last_dentry(struct dentry *dentry, struct dentry *parent)
 {
-	struct dentry *parent = NULL;
-	struct dentry *tmp = NULL;
-	int err;
-
-	lock(dentry->ddent_mutex);
-
-	err = -EBUSY;
-	if (dentry->ref_count > 1)
-		goto out;
-
-	parent = dentry->parent;
-	assert(parent->ddent->size >= 1);
+	assert(have_mutex(&parent->mutex));
 
 	if (parent->ddent->size > 1) {
-		tmp = __get_nth_dentry(parent, parent->ddent->size - 1);
-		err = -PTR_ERR(tmp);
+		struct dentry *tmp = __get_nth_dentry(parent,
+				parent->ddent->size - 1);
 		if (IS_ERR(tmp))
-			goto out;
+			return -PTR_ERR(tmp);
 		if (tmp != dentry)
 			swap_dentries(dentry, tmp);
 		__put_dentry(tmp);
 	}
+
+	return 0;
+}
+
+static void __del_dentry(struct dentry *dentry, struct dentry *parent)
+{
+	assert(have_mutex(&parent->mutex));
 
 	dentry_ptr(dentry) = NULL;
 
@@ -385,14 +392,32 @@ int del_dentry(struct dentry *dentry)
 	if (parent->ddent_cnode)
 		parent->ddent_cnode->dirty = 1;
 	unlock(parent->ddent_mutex);
+}
 
-	err = 0;
+int del_dentry(struct dentry *dentry)
+{
+	struct dentry *parent = NULL;
+	int err;
+
+	lock(dentry->ddent_mutex);
+	parent = dentry->parent;
+	assert(parent->ddent->size >= 1);
+
+	err = -EBUSY;
+	if (dentry->ref_count > 1)
+		goto out;
+
+	err = make_last_dentry(dentry, parent);
+	if (err)
+		goto out;
+
+	__del_dentry(dentry, parent);
 out:
 	unlock(&parent->mutex);
 	return err;
 }
 
-static struct dentry *lookup1(struct dentry *parent, const char *name, int len)
+static struct dentry *lookup(struct dentry *parent, const char *name, int len)
 {
 	struct dentry *prev = NULL;
 	struct dentry *dentry;
@@ -450,7 +475,7 @@ struct dentry *find_dentry_parent(const char *path, struct dentry **pparent,
 		parent = dentry;
 		next = strchr(path, '/');
 		len = next ? next - path : strlen(path);
-		dentry = lookup1(parent, path, len);
+		dentry = lookup(parent, path, len);
 		if (IS_ERR(dentry)) {
 			put_dentry(parent);
 			return dentry;
@@ -522,6 +547,148 @@ struct dentry *create_dentry(const char *path, mode_t mode)
 	dentry = add_dentry(parent, name, mode);
 	put_dentry(parent);
 	return dentry;
+}
+
+static struct dentry *lock_order(struct dentry *a, struct dentry *b)
+{
+	struct dentry *c;
+
+	for (c = a; c; c = c->parent)
+		if (c->parent == b)
+			return a;
+
+	for (c = b; b; b = b->parent)
+		if (b->parent == a)
+			return b;
+
+	return (b > a) ? a : b;
+}
+
+static int __rename_dentry(struct dentry *dentry, const char *new_name,
+		struct dentry *new_parent)
+{
+	struct dentry *old_parent = dentry->parent;
+	struct dentry *shadow;
+	struct dentry *tmp;
+	int err;
+
+	if (strlen(new_name) >= DDENT_NAME_MAX)
+		return -ENAMETOOLONG;
+	if (!dentry->parent)
+		return -EINVAL;
+
+	/*
+	 * Simple case: same directory.
+	 */
+	if (old_parent == new_parent) {
+		lock(dentry->ddent_mutex);
+		namcpy(dentry->ddent->name, new_name);
+		unlock(dentry->ddent_mutex);
+		return 0;
+	}
+
+	/*
+	 * Can't make a dentry be its own decendent.
+	 */
+	for (tmp = new_parent; tmp; tmp = tmp->parent)
+		if (tmp == dentry)
+			return -EINVAL;
+
+	/*
+	 * The hard part: moving from one directory to another.
+	 * Need to do two things: make it easy to delete dentry 
+	 * from old_parent, and allocate a new disk_dentry
+	 * in new_parent. The order of these two operations does
+	 * not matter, except that locking needs to be consitant
+	 * and non-recursive.
+	 *
+	 * If either one of these operations fails,
+	 * the FS is still consistant, and we can bail
+	 * out. But after that, it's do or die.
+	 */
+	tmp = lock_order(old_parent, new_parent);
+	if (tmp == new_parent) {
+		lock(&new_parent->mutex);
+		shadow = __get_nth_dentry(new_parent, new_parent->ddent->size);
+		if (IS_ERR(shadow)) {
+			unlock(&new_parent->mutex);
+			return -PTR_ERR(shadow);
+		}
+
+		lock(&old_parent->mutex);
+		err = make_last_dentry(dentry, old_parent);
+		if (err)
+			goto out;
+	} else {
+		lock(&old_parent->mutex);
+		err = make_last_dentry(dentry, old_parent);
+		if (err) {
+			unlock(&old_parent->mutex);
+			return err;
+		}
+		lock(&new_parent->mutex);
+		shadow = __get_nth_dentry(new_parent, new_parent->ddent->size);
+		if (IS_ERR(shadow)) {
+			err = -PTR_ERR(shadow);
+			goto out;
+		}
+	}
+
+	swap_dentries(shadow, dentry);
+
+	namcpy(dentry->ddent->name, new_name);
+
+	/*
+	 * Shadow is now the last entry in old_parent,
+	 * and old_parent is already locked, we can 
+	 * safely free shadow. 
+	 */
+	__del_dentry(shadow, old_parent);
+
+	/*
+	 * Unlock old_parent, as put_dentry(shadow) needs
+	 * to lock it, and may drop old_parent's ref_count
+	 * to 0. So old_parent will may not be valid later.
+	 */
+	unlock(&old_parent->mutex);
+	put_dentry(shadow);
+	old_parent = NULL;
+
+	/*
+	 * As old_parent may be new_parent's parent,
+	 * we can't lock new_parent->ddent_mutex until here.
+	 * But note that ddent->size is protected by both
+	 * ->mutex and ->ddent_mutex.
+	 */
+	lock(new_parent->ddent_mutex);
+	new_parent->ddent->size ++;
+	unlock(new_parent->ddent_mutex);
+
+out:
+	unlock(&new_parent->mutex);
+	if (old_parent)
+		unlock(&old_parent->mutex);
+	return err;
+}
+
+int rename_dentry(struct dentry *dentry, const char *new_name,
+		struct dentry *new_parent)
+{
+	int err;
+
+	/*
+	 * Serialize multiple renames of the same dentry.
+	 *
+	 * XXX: What if the dentry is deleted?
+	 *      That should be okay, as a racing lookup & delete
+	 *      will result in the delete failing with 
+	 *      EBUSY.    
+	 */
+	lock(&dentry->mutex);
+	err = __rename_dentry(dentry, new_name, new_parent);
+	unlock(&dentry->mutex);
+
+	return err;
 }
 
 static void __attribute__((constructor)) dir_ctor(void)

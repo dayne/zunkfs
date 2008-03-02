@@ -224,6 +224,9 @@ static inline struct dentry *find_dentry(const char *path)
 	return find_dentry_parent(path, NULL, NULL) ?: ERR_PTR(ENOENT);
 }
 
+int rename_dentry(struct dentry *dentry, const char *new_name,
+		struct dentry *new_parent);
+
 int set_root(struct disk_dentry *ddent, struct mutex *ddent_mutex);
 void flush_root(void);
 

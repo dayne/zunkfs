@@ -27,6 +27,7 @@ static const char spaces[] = "                                                  
 
 static void test1(void);
 static void test2(void);
+static void test3(void);
 
 int main(int argc, char **argv)
 {
@@ -56,8 +57,10 @@ int main(int argc, char **argv)
 
 	if (0)
 		test1();
-	if (1)
+	if (0)
 		test2();
+	if (1)
+		test3();
 
 	return 0;
 }
@@ -233,5 +236,65 @@ again:
 	//dump_dentry_2(root, indent_start);
 	printf("max_height=%u\n",max_height);
 	printf("max_leafs=%u\n",max_leafs);
+}
+
+static void test3(void)
+{
+	struct dentry *root;
+	struct dentry *foo;
+	struct dentry *bar;
+	int err;
+
+	root = find_dentry("/");
+	if (IS_ERR(root))
+		panic("find_dentry(/): %s\n", strerror(PTR_ERR(root)));
+
+	printf("Testing rename in the same directory.\n");
+
+	foo = add_dentry(root, "foo", S_IFREG | S_IRWXU);
+	if (IS_ERR(foo))
+		panic("add_dentry(foo): %s\n", strerror(PTR_ERR(foo)));
+
+	err = rename_dentry(foo, "fu", root);
+	if (err)
+		panic("rename_dentry(/foo, /fu): %s\n", strerror(-err));
+
+	printf("After rename_dentry(/foo, /fu):\n");
+	dump_dentry(root, indent_start);
+
+	printf("\nTesting rename in different directories:\n");
+	bar = add_dentry(root, "bar", S_IFDIR | S_IRWXU);
+	if (IS_ERR(bar))
+		panic("add_dentry(bar): %s\n", strerror(PTR_ERR(bar)));
+
+	err = rename_dentry(foo, "foo", bar);
+	if (err)
+		panic("rename_dentry(/fu, /bar/fu): %s\n", strerror(-err));
+
+	printf("After rename_dentry(/fu, /bar/fu):\n");
+	dump_dentry(root, indent_start);
+
+	printf("foo->parent=%p bar=%p root=%p\n", foo->parent, bar, root);
+
+	if (foo->parent != bar)
+		panic("foo->parent != bar\n");
+
+	printf("Before del(foo) root->ddent->size=%llu bar->ddent->size=%llu\n",
+			root->ddent->size, bar->ddent->size);
+
+	err = del_dentry(foo);
+	if (err)
+		panic("del_dentry(/bar/foo): %s\n", strerror(-err));
+	put_dentry(foo);
+
+	printf("After del(foo) root->ddent->size=%llu bar->ddent->size=%llu\n",
+			root->ddent->size, bar->ddent->size);
+
+	err = del_dentry(bar);
+	if (err)
+		panic("del_dentry(/bar): %s\n", strerror(-err));
+	put_dentry(bar);
+
+	put_dentry(root);
 }
 

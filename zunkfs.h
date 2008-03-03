@@ -32,6 +32,15 @@ extern FILE *zunkfs_log_fd;
 	abort(); \
 } while(0)
 
+#define COMPILER_ASSERT(cond, cond_name) \
+static inline void __attribute__((unused)) COMPILER_ASSERT_##cond_name(void) { \
+	switch(0) { \
+	case (cond): \
+	case 0: \
+		break; \
+	} \
+}
+
 /*
  * Linux-ish pointer error handling.
  */
@@ -186,9 +195,13 @@ struct disk_dentry {
 	uint8_t name[DDENT_NAME_MAX];            // .. 256
 };
 
+COMPILER_ASSERT(sizeof(struct disk_dentry) == 256, sizeof_disk_dentry_is_256);
+
 #define namcpy(dst, src)	strcpy((char *)(dst), src)
 #define namcmp(nam, str, len)	strncmp((char *)nam, str, len)
 #define DIRENTS_PER_CHUNK	(CHUNK_SIZE / sizeof(struct disk_dentry))
+
+COMPILER_ASSERT(DIRENTS_PER_CHUNK > 0, DIRENTS_PER_CHUNK_NOT_ZERO);
 
 int init_disk_dentry(struct disk_dentry *ddent);
 

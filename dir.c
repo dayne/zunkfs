@@ -625,6 +625,7 @@ static int __rename_dentry(struct dentry *dentry, const char *new_name,
 
 		swap_dentries(shadow, dentry);
 		namcpy(dentry->ddent->name, new_name);
+
 		__del_dentry(shadow, old_parent);
 		unlock(&old_parent->mutex);
 
@@ -652,6 +653,7 @@ static int __rename_dentry(struct dentry *dentry, const char *new_name,
 
 		swap_dentries(shadow, dentry);
 		namcpy(dentry->ddent->name, new_name);
+
 		locked_inc(&new_parent->ddent->size, new_parent->ddent_mutex);
 		unlock(&new_parent->mutex);
 
@@ -681,10 +683,5 @@ int rename_dentry(struct dentry *dentry, const char *new_name,
 	unlock(&dentry->mutex);
 
 	return err;
-}
-
-static void __attribute__((constructor)) dir_ctor(void)
-{
-	assert(DIRENTS_PER_CHUNK != 0);
 }
 

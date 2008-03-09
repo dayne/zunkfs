@@ -274,6 +274,33 @@ static int zunkfs_utimens(const char *path, const struct timespec tv[2])
 	return 0;
 }
 
+static int zunkfs_rename(const char *src, const char *dst)
+{
+	struct dentry *dentry;
+	struct dentry *dst_parent;
+	int err;
+
+	dentry = find_dentry_parent(dst, &dst_parent, &dst);
+	if (IS_ERR(dentry))
+		return -PTR_ERR(dentry);
+
+	err = -EEXIST;
+	if (dentry)
+		goto out;
+
+	dentry = find_dentry(src);
+	if (IS_ERR(dentry)) {
+		err = -PTR_ERR(dentry);
+		goto out;
+	}
+
+	err = rename_dentry(dentry, dst, dst_parent);
+	put_dentry(dentry);
+out:
+	put_dentry(dst_parent);
+	return err;
+}
+
 static struct fuse_operations zunkfs_operations = {
 	.getattr	= zunkfs_getattr,
 	.readdir	= zunkfs_readdir,
@@ -287,11 +314,15 @@ static struct fuse_operations zunkfs_operations = {
 	.unlink		= zunkfs_unlink,
 	.utimens	= zunkfs_utimens,
 	.rmdir		= zunkfs_rmdir,
+	.rename		= zunkfs_rename
 };
 
 static void usage(const char *argv0)
 {
-	fprintf(stderr, "%s: [-l|--log <file>] root\n", basename(argv0));
+	fprintf(stderr, "%s uses the following environment variables:\n",
+			basename(argv0));
+	fprintf(stderr, "\tZUNKFS_SUPER=<path to superblock>\n");
+	fprintf(stderr, "\tZUNKFS_LOG=<file|stderr|stdout> [optional]\n");
 	exit(1);
 }
 
@@ -305,27 +336,6 @@ int main(int argc, char **argv)
 
 	fs_descr = getenv("ZUNKFS_SUPER");
 	log_file = getenv("ZUNKFS_LOG");
-#if 0
-	for (i = 1; i < argc; i ++) {
-		if (!strcmp(argv[i], "-l") || !strcmp(argv[i], "--log")) {
-			if (argc - i < 2 || log_file)
-				usage(argv[0]);
-			log_file = strdup(argv[i + 1]);
-			assert(log_file != NULL);
-			memmove(argv[i], argv[i + 2], (argc - (i + 1)) * sizeof(char *));
-			i --;
-			argc -= 2;
-		} else if (argv[i][0] != '-') {
-			if (fs_descr)
-				continue;
-			fs_descr = strdup(argv[i]);
-			assert(fs_descr != NULL);
-			memmove(argv[i], argv[i + 1], (argc - i) * sizeof(char *));
-			i --;
-			argc --;
-		}
-	}
-#endif
 
 	if (log_file) {
 		if (!strcmp(log_file, "stderr"))
@@ -339,6 +349,9 @@ int main(int argc, char **argv)
 	if (!fs_descr)
 		usage(argv[0]);
 
+	/*
+	 * XXX: This should be moved to open_zunkfs().
+	 */
 	fd = open(fs_descr, O_RDWR|O_CREAT, 0600);
 	if (fd < 0) {
 		ERROR("open(%s): %s\n", fs_descr, strerror(errno));
@@ -366,17 +379,17 @@ int main(int argc, char **argv)
 			exit(-3);
 		}
 
-		memcpy(root_ddent->digest, root_ddent->secret_digest, CHUNK_DIGEST_LEN);
-
+		memcpy(root_ddent->digest, root_ddent->secret_digest,
+				CHUNK_DIGEST_LEN);
 	} else if (root_ddent->name[0] != '/' || root_ddent->name[1]) {
 		ERROR("Bad superblock.\n");
-		exit(-3);
+		exit(-4);
 	}
 
 	err = set_root(root_ddent, &root_mutex);
 	if (err) {
 		ERROR("Failed to set root: %s\n", strerror(-err));
-		exit(-4);
+		exit(-5);
 	}
 
 	err = fuse_main(argc, argv, &zunkfs_operations, NULL);

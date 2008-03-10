@@ -659,6 +659,7 @@ static int __rename_dentry(struct dentry *dentry, const char *new_name,
 		unlock(&old_parent->mutex);
 
 		new_parent->size ++;
+		new_parent->dirty = 1;
 		unlock(&new_parent->mutex);
 
 		put_dentry(shadow);
@@ -684,6 +685,7 @@ static int __rename_dentry(struct dentry *dentry, const char *new_name,
 		namcpy(dentry->ddent->name, new_name);
 
 		new_parent->size ++;
+		new_parent->dirty = 1;
 		unlock(&new_parent->mutex);
 
 		__del_dentry(shadow, old_parent);

@@ -17,9 +17,6 @@
 #define lock_file(of)  lock(&(of)->dentry->mutex)
 #define unlock_file(of)  unlock(&(of)->dentry->mutex)
 
-#define lock_file_metadata(of) lock((of)->dentry->ddent_mutex)
-#define unlock_file_metadata(of) unlock((of)->dentry->ddent_mutex)
-
 static struct open_file *open_file_dentry(struct dentry *dentry)
 {
 	struct open_file *ofile;

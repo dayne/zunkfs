@@ -36,7 +36,7 @@ static int zunkfs_getattr(const char *path, struct stat *stbuf)
 
 	lock(&dentry->mutex);
 
-	stbuf->st_ino = dentry->ddent->ctime;
+	memcpy(&stbuf->st_ino, dentry->ddent->secret_digest, sizeof(ino_t));
 	stbuf->st_mode = dentry->ddent->mode;
 	stbuf->st_nlink = 1;
 	stbuf->st_uid = getuid();

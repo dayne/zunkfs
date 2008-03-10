@@ -25,7 +25,6 @@
 static int zunkfs_getattr(const char *path, struct stat *stbuf)
 {
 	struct dentry *dentry;
-	struct disk_dentry *ddent;
 
 	TRACE("%s\n", path);
 
@@ -35,23 +34,21 @@ static int zunkfs_getattr(const char *path, struct stat *stbuf)
 
 	memset(stbuf, 0, sizeof(struct stat));
 
-	ddent = dentry->ddent;
+	lock(&dentry->mutex);
 
-	lock(dentry->ddent_mutex);
-
-	stbuf->st_ino = ddent->ctime;
-	stbuf->st_mode = ddent->mode;
+	stbuf->st_ino = dentry->ddent->ctime;
+	stbuf->st_mode = dentry->ddent->mode;
 	stbuf->st_nlink = 1;
 	stbuf->st_uid = getuid();
 	stbuf->st_gid = getgid();
 	stbuf->st_size = dentry->size;
-	stbuf->st_atime = ddent->mtime;
-	stbuf->st_mtime = ddent->mtime;
-	stbuf->st_ctime = ddent->ctime;
+	stbuf->st_atime = dentry->mtime;
+	stbuf->st_mtime = dentry->mtime;
+	stbuf->st_ctime = dentry->ddent->ctime;
 	stbuf->st_blksize = 4096;
 	stbuf->st_blocks = (dentry->size + 4095) / 4096;
 
-	unlock(dentry->ddent_mutex);
+	unlock(&dentry->mutex);
 	put_dentry(dentry);
 
 	return 0;

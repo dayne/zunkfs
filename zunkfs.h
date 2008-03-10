@@ -44,7 +44,7 @@ static inline void __attribute__((unused)) COMPILER_ASSERT_##cond_name(void) { \
 /*
  * Linux-ish pointer error handling.
  */
-extern void *const __errbuf;
+extern void *const __errptr;
 
 #define MAX_ERRNO	256
 
@@ -53,14 +53,14 @@ static inline void *__ERR_PTR(int err, const char *funct, int line)
 {
 	if (err > 0 && err < MAX_ERRNO) {
 		zprintf('E', funct, line, "%s\n", strerror(err));
-		return (void *)(__errbuf + err);
+		return (void *)(__errptr + err);
 	}
 	return NULL;
 }
 
 static inline int __PTR_ERR(const void *ptr, const char *funct, int line)
 {
-	int err = (ptr - __errbuf);
+	int err = (ptr - __errptr);
 	if (err > 0 && err < MAX_ERRNO)
 		zprintf('E', funct, line, "%s\n", strerror(err));
 	return err;
@@ -71,39 +71,34 @@ static inline int __PTR_ERR(const void *ptr, const char *funct, int line)
 #else
 static inline void *ERR_PTR(int err)
 {
-	return (void *)(__errbuf + err);
+	return (void *)(__errptr + err);
 }
 
 static inline int PTR_ERR(const void  *ptr)
 {
-	return ptr - __errbuf;
+	return ptr - __errptr;
 }
 #endif
 
 static inline int IS_ERR(const void *ptr)
 {
-	return ptr >= __errbuf && ptr < __errbuf + MAX_ERRNO;
+	return ptr >= __errptr && ptr < __errptr + MAX_ERRNO;
 }
+
 /*
+ * Chunkdb.
+ *
  * write_chunk() updates 'digest' field.
  */
 int write_chunk(const unsigned char *chunk, unsigned char *digest);
 int read_chunk(unsigned char *chunk, const unsigned char *digest);
 void zero_chunk_digest(unsigned char *digest);
 int random_chunk_digest(unsigned char *digest);
-
 int verify_chunk(const unsigned char *chunk, const unsigned char *digest);
-
 const char *__digest_string(const unsigned char *digest, char *strbuf);
 
 #define digest_string(digest) \
 	__digest_string(digest, alloca(CHUNK_DIGEST_STRLEN + 1))
-
-/*
- * chunk garbage collection.
- */
-void ref_chunk(const unsigned char *digest);
-void unref_chunk(const unsigned char *digest);
 
 /*
  * Mutex wrappers.
@@ -113,10 +108,11 @@ struct mutex {
 	pthread_t owner;
 };
 
-#define INIT_MUTEX { \
-	PTHREAD_ERRORCHECK_MUTEX_INITIALIZER_NP, \
-	(pthread_t)-1 \
-}
+#ifndef NDEBUG
+#define INIT_MUTEX { PTHREAD_ERRORCHECK_MUTEX_INITIALIZER_NP, (pthread_t)-1 }
+#else
+#define INIT_MUTEX { PTHREAD_MUTEX_INITIALIZER, (pthread_t)-1 }
+#endif
 
 #define DECLARE_MUTEX(name) \
 	struct mutex name = INIT_MUTEX
@@ -145,6 +141,9 @@ static inline int have_mutex(const struct mutex *m)
 	unlock(mutex); \
 } while(0)
 
+/*
+ * Chunk management
+ */
 struct chunk_tree;
 
 struct chunk_tree_operations {

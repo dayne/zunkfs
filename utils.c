@@ -45,17 +45,17 @@ void __zprintf(char level, const char *function, int line, const char *fmt, ...)
 	unlock(&log_mutex);
 }
 
-void *const __errbuf;
+void *const __errptr;
 
 static void __attribute__((constructor)) util_init(void)
 {
-	void *errbuf = mmap(NULL, (MAX_ERRNO + 4095) & ~4095, PROT_NONE,
+	void *errptr = mmap(NULL, (MAX_ERRNO + 4095) & ~4095, PROT_NONE,
 			MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
-	if (errbuf == MAP_FAILED) {
-		fprintf(stderr, "errbuf: %s\n", strerror(errno));
+	if (errptr == MAP_FAILED) {
+		fprintf(stderr, "errptr: %s\n", strerror(errno));
 		exit(-1);
 	}
-	memcpy((void *)&__errbuf, &errbuf, sizeof(void *));
+	memcpy((void *)&__errptr, &errptr, sizeof(void *));
 }
 
 /*

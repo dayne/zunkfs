@@ -124,7 +124,7 @@ read_again3:
 	}
 
 	printf("size=%llu nr_leafs=%u height=%u\n",
-			ofile->dentry->ddent->size,
+			ofile->dentry->size,
 			ofile->dentry->chunk_tree.nr_leafs,
 			ofile->dentry->chunk_tree.height);
 

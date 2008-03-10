@@ -213,13 +213,16 @@ int init_disk_dentry(struct disk_dentry *ddent);
  * 	lock dentry before ddent_mutex
  * ->ddent->digest	ddent_mutex
  * ->ddent->mode	ddent_mutex
- * ->ddent->size	mutex, ddent_mutex
+ * ->ddent->size	ddent_mutex
  * ->ddent->ctime	ddent_mutex
- * ->ddent->mtime	mutex, ddent_mutex
+ * ->ddent->mtime	ddent_mutex
  * ->ddent->name	ddent_mutex
- * ->ddent_cnode->dirty	mutex, ddent_mutex
+ * ->ddent_cnode->dirty	ddent_mutex
  * ->ref_count 		ddent_mutex
  * ->chunk_tree		mutex
+ * ->dirty              mutex
+ * ->size               mutex
+ * ->mtime		mutex
  */
 struct dentry {
 	struct disk_dentry *ddent;
@@ -230,6 +233,13 @@ struct dentry {
 	unsigned ref_count;
 	struct chunk_tree chunk_tree;
 	unsigned char *secret_chunk;
+	unsigned dirty:1;
+	/*
+	 * mirror some ddent values
+	 * here to simplify locking
+	 */
+	uint64_t size;
+	time_t mtime;
 };
 
 struct dentry *get_nth_dentry(struct dentry *parent, unsigned nr);

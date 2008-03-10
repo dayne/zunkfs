@@ -285,16 +285,16 @@ static void test3(void)
 	printf("After rename_dentry(/bar/foo, /foo):\n");
 	dump_dentry(root, indent_start);
 
-	printf("Before del(foo) root->ddent->size=%llu bar->ddent->size=%llu\n",
-			root->ddent->size, bar->ddent->size);
+	printf("Before del(foo) root->size=%llu bar->size=%llu\n",
+			root->size, bar->size);
 
 	err = del_dentry(foo);
 	if (err)
 		panic("del_dentry(/bar/foo): %s\n", strerror(-err));
 	put_dentry(foo);
 
-	printf("After del(foo) root->ddent->size=%llu bar->ddent->size=%llu\n",
-			root->ddent->size, bar->ddent->size);
+	printf("After del(foo) root->size=%llu bar->size=%llu\n",
+			root->size, bar->size);
 
 	err = del_dentry(bar);
 	if (err)

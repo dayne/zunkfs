@@ -130,16 +130,15 @@ static int rw_file(struct open_file *ofile, char *buf, size_t bufsz,
 	uint64_t file_size;
 	int len, cplen;
 
-	/*
-	 * size won't change w/out dentry mutex.
-	 */
-	file_size = ofile->dentry->ddent->size;
+	file_size = ofile->dentry->size;
 	if (offset > file_size)
 		return -EINVAL;
 	if (read && offset == file_size)
 		return 0;
 	if (bufsz > INT_MAX)
 		return -EINVAL;
+	if (read && (bufsz + offset) > file_size)
+		bufsz = file_size - offset;
 
 	chunk_nr = offset / CHUNK_SIZE;
 	chunk_off = offset % CHUNK_SIZE;
@@ -169,12 +168,10 @@ static int rw_file(struct open_file *ofile, char *buf, size_t bufsz,
 	}
 
 	if (!read) {
-		lock_file_metadata(ofile);
 		if ((len + offset) > file_size)
-			ofile->dentry->ddent->size = len + offset;
-		ofile->dentry->ddent->mtime = time(NULL);
-		ofile->dentry->ddent_cnode->dirty = 1;
-		unlock_file_metadata(ofile);
+			ofile->dentry->size = len + offset;
+		ofile->dentry->mtime = time(NULL);
+		ofile->dentry->dirty = 1;
 	}
 
 	return len;

@@ -44,12 +44,12 @@ static int zunkfs_getattr(const char *path, struct stat *stbuf)
 	stbuf->st_nlink = 1;
 	stbuf->st_uid = getuid();
 	stbuf->st_gid = getgid();
-	stbuf->st_size = ddent->size;
+	stbuf->st_size = dentry->size;
 	stbuf->st_atime = ddent->mtime;
 	stbuf->st_mtime = ddent->mtime;
 	stbuf->st_ctime = ddent->ctime;
 	stbuf->st_blksize = 4096;
-	stbuf->st_blocks = (ddent->size + 4095) / 4096;
+	stbuf->st_blocks = (dentry->size + 4095) / 4096;
 
 	unlock(dentry->ddent_mutex);
 	put_dentry(dentry);
@@ -244,7 +244,7 @@ static int zunkfs_rmdir(const char *path)
 		goto out;
 
 	err = -EBUSY;
-	if (dentry->ddent->size)
+	if (dentry->size)
 		put_dentry(dentry);
 
 	err = del_dentry(dentry);

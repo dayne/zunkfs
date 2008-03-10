@@ -42,7 +42,7 @@ static int read_dentry_chunk(unsigned char *chunk, const unsigned char *digest)
 	/*
 	 * Chunk will be empty, so nothing to read.
 	 */
-	if (!dentry->ddent->size)
+	if (!dentry->size)
 		return 0;
 
 	err = read_chunk(chunk, digest);
@@ -99,6 +99,9 @@ static struct dentry *new_dentry(struct dentry *parent,
 	dentry->ddent_cnode = ddent_cnode;
 	dentry->ddent_mutex = ddent_mutex;
 	dentry->parent = parent;
+	dentry->size = ddent->size;
+	dentry->mtime = ddent->mtime;
+
 	init_mutex(&dentry->mutex);
 	dentry->ref_count = 0;
 	memset(&dentry->chunk_tree, 0, sizeof(struct chunk_tree));
@@ -149,7 +152,8 @@ struct chunk_node *get_dentry_chunk(struct dentry *dentry, unsigned chunk_nr)
 		dentry->secret_chunk = malloc(CHUNK_SIZE);
 		if (!dentry->secret_chunk)
 			return ERR_PTR(ENOMEM);
-		err = read_chunk(dentry->secret_chunk, dentry->ddent->secret_digest);
+		err = read_chunk(dentry->secret_chunk,
+				dentry->ddent->secret_digest);
 		if (err < 0)
 			return ERR_PTR(-err);
 		err = init_chunk_tree(&dentry->chunk_tree,
@@ -192,7 +196,7 @@ static struct dentry *__get_nth_dentry(struct dentry *parent, unsigned nr)
 		goto got_dentry;
 
 	ddent = (struct disk_dentry *)cnode->chunk_data + chunk_off;
-	if (nr == parent->ddent->size) {
+	if (nr == parent->size) {
 		err = init_disk_dentry(ddent);
 		if (err < 0) {
 			dentry = ERR_PTR(-err);
@@ -220,7 +224,7 @@ struct dentry *get_nth_dentry(struct dentry *parent, unsigned nr)
 
 	if (!S_ISDIR(parent->ddent->mode))
 		return ERR_PTR(ENOTDIR);
-	if (nr >= parent->ddent->size)
+	if (nr >= parent->size)
 		return ERR_PTR(ENOENT);
 
 	lock(&parent->mutex);
@@ -230,6 +234,35 @@ struct dentry *get_nth_dentry(struct dentry *parent, unsigned nr)
 	return dentry;
 }
 
+/*
+ * Dentry must be either about-to-be freed or have
+ * it's mutex locked.
+ */
+static void flush_dentry(struct dentry *dentry)
+{
+	assert(have_mutex(dentry->ddent_mutex));
+	assert(have_mutex(&dentry->mutex) || dentry->ref_count == 0);
+
+	if (dentry->chunk_tree.root) {
+		int err = flush_chunk_tree(&dentry->chunk_tree);
+		if (err < 0) {
+			WARNING("flush_dentry %p: %s\n", dentry,
+					strerror(-err));
+			return;
+		}
+		if (dentry->chunk_tree.root->dirty)
+			dentry->dirty = 1;
+	}
+	
+	if (dentry->dirty) {
+		dentry->ddent->size = dentry->size;
+		dentry->ddent->mtime = dentry->mtime;
+		if (dentry->ddent_cnode)
+			dentry->ddent_cnode->dirty = 1;
+		dentry->dirty = 0;
+	}
+}
+
 static void free_dentry(struct dentry *dentry)
 {
 	assert(have_mutex(dentry->ddent_mutex));
@@ -237,16 +270,16 @@ static void free_dentry(struct dentry *dentry)
 	assert(dentry->ddent != NULL);
 	assert(dentry->ddent_cnode != NULL);
 
+	flush_dentry(dentry);
+
 	if (dentry->chunk_tree.root) {
 		assert(dentry->secret_chunk != NULL);
 		free(dentry->secret_chunk);
-		if (dentry->chunk_tree.root->dirty)
-			dentry->ddent_cnode->dirty = 1;
-
 		free_chunk_tree(&dentry->chunk_tree);
 	}
 
 	dentry_ptr(dentry) = NULL;
+
 	put_chunk_node(dentry->ddent_cnode);
 
 	free(dentry);
@@ -293,33 +326,33 @@ void put_dentry(struct dentry *dentry)
 struct dentry *add_dentry(struct dentry *parent, const char *name, mode_t mode)
 {
 	struct dentry *dentry;
+	time_t now;
 
 	if (strlen(name) >= DDENT_NAME_MAX)
 		return ERR_PTR(ENAMETOOLONG);
 
 	lock(&parent->mutex);
 
-	dentry = __get_nth_dentry(parent, parent->ddent->size);
+	dentry = __get_nth_dentry(parent, parent->size);
 	if (IS_ERR(dentry))
 		goto out;
+
+	now = time(NULL);
 
 	namcpy(dentry->ddent->name, name);
 
 	dentry->ddent->mode = mode;
 	dentry->ddent->size = 0;
-	dentry->ddent->ctime = time(NULL);
-	dentry->ddent->mtime = dentry->ddent->ctime;
+	dentry->ddent->ctime = now;
+	dentry->ddent->mtime = now;
 
-	dentry->ddent_cnode->dirty = 1;
+	dentry->dirty = 1;
+	dentry->size = 0;
+	dentry->mtime = now;
 
-	lock(parent->ddent_mutex);
-	parent->ddent->size ++;
-	parent->ddent->mtime = time(NULL);
-	unlock(parent->ddent_mutex);
-
-	if (parent->ddent_cnode)
-		parent->ddent_cnode->dirty = 1;
-
+	parent->dirty = 1;
+	parent->size ++;
+	parent->mtime = now;
 out:
 	unlock(&parent->mutex);
 	return dentry;
@@ -366,9 +399,8 @@ static int make_last_dentry(struct dentry *dentry, struct dentry *parent)
 {
 	assert(have_mutex(&parent->mutex));
 
-	if (parent->ddent->size > 1) {
-		struct dentry *tmp = __get_nth_dentry(parent,
-				parent->ddent->size - 1);
+	if (parent->size > 1) {
+		struct dentry *tmp = __get_nth_dentry(parent, parent->size - 1);
 		if (IS_ERR(tmp))
 			return -PTR_ERR(tmp);
 		if (tmp != dentry)
@@ -385,13 +417,9 @@ static void __del_dentry(struct dentry *dentry, struct dentry *parent)
 
 	dentry_ptr(dentry) = NULL;
 
-	lock(parent->ddent_mutex);
-	parent->ddent->size --;
-	parent->ddent->mtime = time(NULL);
-
-	if (parent->ddent_cnode)
-		parent->ddent_cnode->dirty = 1;
-	unlock(parent->ddent_mutex);
+	parent->size --;
+	parent->dirty = 1;
+	parent->mtime = time(NULL);
 }
 
 int del_dentry(struct dentry *dentry)
@@ -401,7 +429,7 @@ int del_dentry(struct dentry *dentry)
 
 	lock(dentry->ddent_mutex);
 	parent = dentry->parent;
-	assert(parent->ddent->size >= 1);
+	assert(parent->size >= 1);
 
 	err = -EBUSY;
 	if (dentry->ref_count > 1)
@@ -437,7 +465,7 @@ static struct dentry *lookup(struct dentry *parent, const char *name, int len)
 	}
 
 	lock(&parent->mutex);
-	for (nr = 0; nr < parent->ddent->size; nr ++) {
+	for (nr = 0; nr < parent->size; nr ++) {
 		dentry = __get_nth_dentry(parent, nr);
 		if (IS_ERR(dentry))
 			goto out;
@@ -525,8 +553,9 @@ void flush_root(void)
 	assert(root_dentry != NULL);
 
 	lock(&root_dentry->mutex);
-	if (root_dentry->chunk_tree.root)
-		flush_chunk_tree(&root_dentry->chunk_tree);
+	lock(root_dentry->ddent_mutex);
+	flush_dentry(root_dentry);
+	unlock(root_dentry->ddent_mutex);
 	unlock(&root_dentry->mutex);
 }
 
@@ -609,7 +638,7 @@ static int __rename_dentry(struct dentry *dentry, const char *new_name,
 	tmp = lock_order(old_parent, new_parent);
 	if (tmp == new_parent) {
 		lock(&new_parent->mutex);
-		shadow = __get_nth_dentry(new_parent, new_parent->ddent->size);
+		shadow = __get_nth_dentry(new_parent, new_parent->size);
 		if (IS_ERR(shadow)) {
 			unlock(&new_parent->mutex);
 			return -PTR_ERR(shadow);
@@ -629,7 +658,7 @@ static int __rename_dentry(struct dentry *dentry, const char *new_name,
 		__del_dentry(shadow, old_parent);
 		unlock(&old_parent->mutex);
 
-		locked_inc(&new_parent->ddent->size, new_parent->ddent_mutex);
+		new_parent->size ++;
 		unlock(&new_parent->mutex);
 
 		put_dentry(shadow);
@@ -644,7 +673,7 @@ static int __rename_dentry(struct dentry *dentry, const char *new_name,
 		}
 
 		lock(&new_parent->mutex);
-		shadow = __get_nth_dentry(new_parent, new_parent->ddent->size);
+		shadow = __get_nth_dentry(new_parent, new_parent->size);
 		if (IS_ERR(shadow)) {
 			unlock(&old_parent->mutex);
 			unlock(&new_parent->mutex);
@@ -654,7 +683,7 @@ static int __rename_dentry(struct dentry *dentry, const char *new_name,
 		swap_dentries(shadow, dentry);
 		namcpy(dentry->ddent->name, new_name);
 
-		locked_inc(&new_parent->ddent->size, new_parent->ddent_mutex);
+		new_parent->size ++;
 		unlock(&new_parent->mutex);
 
 		__del_dentry(shadow, old_parent);

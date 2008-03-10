@@ -91,7 +91,7 @@ void dump_dentry_2(struct dentry *dentry, const char *indent)
 			indent, dentry, dentry->ddent,
 			dentry->ddent_cnode, dentry->parent,
 			dentry->ddent->name, dentry->ref_count,
-			(long)dentry->ddent->size,
+			(long)dentry->size,
 			S_ISDIR(dentry->ddent->mode) ? "dir" : 
 			S_ISREG(dentry->ddent->mode) ? "reg" :
 			"???");
@@ -99,7 +99,7 @@ void dump_dentry_2(struct dentry *dentry, const char *indent)
 	if (!S_ISDIR(dentry->ddent->mode))
 		return;
 
-	for (i = 0; i < dentry->ddent->size; i ++) {
+	for (i = 0; i < dentry->size; i ++) {
 		child = get_nth_dentry(dentry, i);
 		if (IS_ERR(child)) {
 			fprintf(stderr, "PANIC: get_nth_dentry(%p, %d): %s\n",

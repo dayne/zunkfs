@@ -298,6 +298,23 @@ out:
 	return err;
 }
 
+static int zunkfs_chmod(const char *path, mode_t mode)
+{
+	struct dentry *dentry;
+
+	if ((mode & S_IFMT) != 0)
+		return -EINVAL;
+
+	dentry = find_dentry(path);
+	if (IS_ERR(dentry))
+		return -PTR_ERR(dentry);
+
+	dentry_chmod(dentry, mode & ~S_IFMT);
+	put_dentry(dentry);
+
+	return 0;
+}
+
 static struct fuse_operations zunkfs_operations = {
 	.getattr	= zunkfs_getattr,
 	.readdir	= zunkfs_readdir,
@@ -311,7 +328,8 @@ static struct fuse_operations zunkfs_operations = {
 	.unlink		= zunkfs_unlink,
 	.utimens	= zunkfs_utimens,
 	.rmdir		= zunkfs_rmdir,
-	.rename		= zunkfs_rename
+	.rename		= zunkfs_rename,
+	.chmod		= zunkfs_chmod
 };
 
 static void usage(const char *argv0)

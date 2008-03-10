@@ -260,6 +260,8 @@ static inline struct dentry *find_dentry(const char *path)
 int rename_dentry(struct dentry *dentry, const char *new_name,
 		struct dentry *new_parent);
 
+void dentry_chmod(struct dentry *dentry, mode_t mode);
+
 int set_root(struct disk_dentry *ddent, struct mutex *ddent_mutex);
 void flush_root(void);
 

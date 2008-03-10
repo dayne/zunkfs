@@ -714,3 +714,10 @@ int rename_dentry(struct dentry *dentry, const char *new_name,
 	return err;
 }
 
+void dentry_chmod(struct dentry *dentry, mode_t mode)
+{
+	lock(dentry->ddent_mutex);
+	dentry->ddent->mode = (dentry->ddent->mode & S_IFMT) | mode;
+	unlock(dentry->ddent_mutex);
+}
+

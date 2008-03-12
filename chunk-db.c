@@ -10,10 +10,12 @@
 #include <string.h>
 #include <unistd.h>
 #include <limits.h>
+#include <signal.h>
 
 #include <openssl/sha.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 
 #include "zunkfs.h"
 
@@ -58,6 +60,116 @@ const char *__digest_string(const unsigned char *digest, char *strbuf)
 	return strbuf;
 }
 
+static int fetch_chunk(unsigned char *chunk, const unsigned char *digest)
+{
+	const char *cmd;
+	char chunk_name[CHUNK_DIGEST_STRLEN+1];
+	int err;
+	int fd[2];
+	int pid;
+	int len;
+	int n;
+
+	cmd = getenv("ZUNKFS_FETCH");
+	if  (!cmd)
+		return -EIO;
+
+	__digest_string(digest, chunk_name);
+
+	TRACE("chunk=%s using %s\n", chunk_name, cmd);
+
+	err = pipe(fd);
+	if (err) {
+		ERROR("pipe: %s\n", strerror(errno));
+		return -EIO;
+	}
+
+	pid = fork();
+	if (pid < 0) {
+		ERROR("fork: %s\n", strerror(errno));
+		close(fd[0]);
+		close(fd[1]);
+		return -EIO;
+	}
+
+	if (pid) {
+		int status;
+
+		close(fd[1]);
+
+		for (len = 0; len < CHUNK_SIZE; ) {
+			n = read(fd[0], chunk + len, CHUNK_SIZE - len);
+			if (n < 0) {
+				if (errno == EINTR)
+					continue;
+				WARNING("read: %s\n", strerror(errno));
+				err = -errno;
+				close(fd[1]);
+				kill(pid, 9);
+				waitpid(pid, NULL, 0);
+				return -EIO;
+			}
+			if (!n)
+				break;
+			len += n;
+		}
+
+		close(fd[0]);
+		
+		err = waitpid(pid, &status, 0);
+		if (err < 0) {
+			ERROR("waidpid: %s\n", strerror(errno));
+			return -EIO;
+		}
+		if (!WIFEXITED(status)) {
+			ERROR("Fetcher died unexpectedly.\n");
+			return -EIO;
+		}
+		if (WEXITSTATUS(status)) {
+			ERROR("Fetcher returned %d\n", WEXITSTATUS(status));
+			return -EIO;
+		}
+		if (!verify_chunk(chunk, digest)) {
+			ERROR("Chunk failed verification\n");
+			return -EIO;
+		}
+
+		TRACE("len=%d", len);
+
+		return len;
+	}
+
+	close(fd[0]);
+
+	err = dup2(fd[1], STDOUT_FILENO);
+	if (err < 0) {
+		err = errno;
+		ERROR("stdout redirection failed: %s\n", strerror(err));
+		exit(-errno);
+	}
+
+	if (zunkfs_log_fd) {
+		err = dup2(fileno(zunkfs_log_fd), STDERR_FILENO);
+		if (err < 0) {
+			err = errno;
+			ERROR("stderr redirection failed: %s\n", strerror(err));
+			exit(-errno);
+		}
+	}
+
+	execl(cmd, cmd, chunk_dir, chunk_name, NULL);
+
+	err = errno;
+
+	ERROR("\"%s %s %s\" failed: %s\n", cmd, chunk_dir, chunk_name,
+			strerror(err));
+
+	exit(-err);
+
+	/* prevent compiler warnings */
+	return 0;
+}
+
 int read_chunk(unsigned char *chunk, const unsigned char *digest)
 {
 	int err, fd, len, n;
@@ -71,6 +183,8 @@ int read_chunk(unsigned char *chunk, const unsigned char *digest)
 
 	fd = open(path, O_RDONLY);
 	if (fd < 0) {
+		if (errno == ENOENT)
+			return fetch_chunk(chunk, digest);
 		WARNING("%s: %s\n", path, strerror(errno));
 		free(path);
 		return -EIO;

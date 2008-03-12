@@ -183,10 +183,11 @@ int read_chunk(unsigned char *chunk, const unsigned char *digest)
 
 	fd = open(path, O_RDONLY);
 	if (fd < 0) {
-		if (errno == ENOENT)
-			return fetch_chunk(chunk, digest);
-		WARNING("%s: %s\n", path, strerror(errno));
+		int err = errno;
 		free(path);
+		if (err == ENOENT)
+			return fetch_chunk(chunk, digest);
+		WARNING("%s: %s\n", path, strerror(err));
 		return -EIO;
 	}
 	free(path);

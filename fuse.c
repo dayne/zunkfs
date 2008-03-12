@@ -338,6 +338,7 @@ static void usage(const char *argv0)
 			basename(argv0));
 	fprintf(stderr, "\tZUNKFS_SUPER=<path to superblock>\n");
 	fprintf(stderr, "\tZUNKFS_LOG=<file|stderr|stdout> [optional]\n");
+	fprintf(stderr, "\tZUNKFS_FETCH=<path to fetcher>\n");
 	exit(1);
 }
 

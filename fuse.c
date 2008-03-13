@@ -18,9 +18,7 @@
 #include <ctype.h>
 #include <stdarg.h>
 #include <pthread.h>
-#include <signal.h>
 #include <sys/mman.h>
-#include <sys/wait.h>
 
 #include "zunkfs.h"
 
@@ -344,12 +342,6 @@ static void usage(const char *argv0)
 	exit(1);
 }
 
-static void sighand(int signo)
-{
-	if (signo == SIGCHLD)
-		waitpid(-1, NULL, WNOHANG);
-}
-
 int main(int argc, char **argv)
 {
 	struct disk_dentry *root_ddent;
@@ -357,9 +349,6 @@ int main(int argc, char **argv)
 	char *fs_descr = NULL;
 	char *log_file = NULL;
 	int fd, err;
-
-	signal(SIGCHLD, sighand);
-	signal(SIGPIPE, SIG_IGN);
 
 	fs_descr = getenv("ZUNKFS_SUPER");
 	log_file = getenv("ZUNKFS_LOG");

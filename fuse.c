@@ -381,33 +381,42 @@ static void set_root_file(const char *fs_descr)
 }
 
 enum {
-	ZUNKFS_LOG,
-	ZUNKFS_FETCH_CMD
+	OPT_HELP,
+	OPT_LOG,
+	OPT_CHUNK_DB
 };
 
 static struct fuse_opt zunkfs_opts[] = {
-	FUSE_OPT_KEY("--log=%s", ZUNKFS_LOG),
-	FUSE_OPT_KEY("--fetch=%s", ZUNKFS_FETCH_CMD),
+	FUSE_OPT_KEY("--help", OPT_HELP),
+	FUSE_OPT_KEY("-h", OPT_HELP),
+	FUSE_OPT_KEY("--log=%s", OPT_LOG),
+	FUSE_OPT_KEY("--chunk-db=%s", OPT_CHUNK_DB),
 	FUSE_OPT_END
 };
 
-static void usage(const char *argv0)
+static const char *prog = NULL;
+
+static void usage(void)
 {
-	fprintf(stderr, "Usage: %s [options] root_ddent mountpt\n",
-			basename(argv0));
+	/* FIXME: Need to play nicely with FUSE's --help. */
+	fprintf(stderr, "Usage: %s [options] root_ddent mountpt\n", prog);
 	fprintf(stderr, "\t--log=[level,]<file|stderr|stdout>\n");
 	fprintf(stderr, "\t\tlevel is one of (E)rror, (W)arning, (T)race\n");
-	fprintf(stderr, "\t--fetch=</path/to/fetch/cmd>\n");
-	exit(1);
+	fprintf(stderr, "\t--chunk-db=<rw|ro>,<dbspec>\n");
+	fprintf(stderr, "\n");
 }
 
 static int opt_proc(void *data, const char *arg, int key,
 		struct fuse_args *args)
 {
 	static unsigned root_set = 0;
+	int err;
 
 	switch(key) {
-	case ZUNKFS_LOG:
+	case OPT_HELP:
+		usage();
+		return 1;
+	case OPT_LOG:
 		if (zunkfs_log_fd) {
 			fprintf(stderr, "Log file specified more than once.\n");
 			return -1;
@@ -426,8 +435,19 @@ static int opt_proc(void *data, const char *arg, int key,
 		else
 			zunkfs_log_fd = fopen(arg, "w");
 		return 0;
-	case ZUNKFS_FETCH_CMD:
-		set_fetch_cmd(arg + 8);
+	case OPT_CHUNK_DB:
+		arg += 11;
+		if (!strncmp(arg, "ro,", 3))
+			err = add_chunkdb(CHUNKDB_RO, arg + 3);
+		else if (!strncmp(arg, "rw,", 3))
+			err = add_chunkdb(CHUNKDB_RW, arg + 3);
+		else
+			return -1;
+		if (err) {
+			fprintf(stderr, "Failed to add chunkdb %s: %s\n", arg,
+					strerror(-err));
+			return -1;
+		}
 		return 0;
 	default:
 		if (arg[0] == '-' || root_set)
@@ -443,11 +463,16 @@ int main(int argc, char **argv)
 	struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
 	int err;
 
-	if (fuse_opt_parse(&args, NULL, zunkfs_opts, opt_proc))
-		usage(argv[0]);
+	prog = basename(argv[0]);
+
+	if (fuse_opt_parse(&args, NULL, zunkfs_opts, opt_proc)) {
+		usage();
+		return -1;
+	}
 
 	err = fuse_main(args.argc, args.argv, &zunkfs_operations, NULL);
-	flush_root();
+	if (!err)
+		flush_root();
 	return err;
 }
 

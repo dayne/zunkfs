@@ -19,8 +19,11 @@
 
 #include "zunkfs.h"
 
-static char chunk_dir[PATH_MAX];
-static const char *fetch_cmd = NULL;
+static chunkdb_ctor *ctor_list = NULL;
+static int ctor_count = 0;
+
+static struct chunk_db **chunkdb_list = NULL;
+static int chunkdb_count = 0;
 
 static inline int cmp_digest(const unsigned char *a, const unsigned char *b)
 {
@@ -59,8 +62,23 @@ const char *__digest_string(const unsigned char *digest, char *strbuf)
 	return strbuf;
 }
 
-static int fetch_chunk(unsigned char *chunk, const unsigned char *digest)
+#define INT_CHUNK_SIZE	((CHUNK_SIZE + sizeof(int) - 1) / sizeof(int))
+
+int random_chunk_digest(unsigned char *digest)
 {
+	int i, chunk_data[INT_CHUNK_SIZE] = {0};
+
+	for (i = 0; i < INT_CHUNK_SIZE; i ++)
+		chunk_data[i] = rand();
+
+	return write_chunk((void *)chunk_data, digest);
+}
+
+
+static int fetch_chunk(unsigned char *chunk, const unsigned char *digest,
+		void *db_info)
+{
+	const char *fetch_cmd = db_info;
 	char chunk_name[CHUNK_DIGEST_STRLEN+1];
 	int err;
 	int fd[2];
@@ -154,21 +172,47 @@ static int fetch_chunk(unsigned char *chunk, const unsigned char *digest)
 		}
 	}
 
-	execl(fetch_cmd, fetch_cmd, chunk_dir, chunk_name, NULL);
+	execl(fetch_cmd, fetch_cmd, chunk_name, NULL);
 
 	err = errno;
-
-	ERROR("\"%s %s %s\" failed: %s\n", fetch_cmd, chunk_dir, chunk_name,
-			strerror(err));
-
+	ERROR("\"%s %s\" failed: %s\n", fetch_cmd, chunk_name, strerror(err));
 	exit(-err);
 
 	/* prevent compiler warnings */
 	return 0;
 }
 
-int read_chunk(unsigned char *chunk, const unsigned char *digest)
+static struct chunk_db *ext_chunkdb_ctor(int mode, const char *spec)
 {
+	struct chunk_db *cdb;
+
+	if (strncmp(spec, "cmd:", 4))
+		return NULL;
+
+	TRACE("mode=%d spec=%s\n", mode, spec);
+
+	if (mode != CHUNKDB_RO)
+		return ERR_PTR(EINVAL);
+	if (access(spec + 4, X_OK))
+		return ERR_PTR(EACCES);
+
+	cdb = malloc(sizeof(struct chunk_db) + strlen(spec + 4) + 1);
+	if (!cdb)
+		return ERR_PTR(ENOMEM);
+
+	cdb->db_info = (void *)(cdb + 1);
+	strcpy(cdb->db_info, spec + 4);
+
+	cdb->read_chunk = fetch_chunk;
+	cdb->write_chunk = NULL;
+
+	return cdb;
+}
+
+static int local_read_chunk(unsigned char *chunk, const unsigned char *digest,
+		void *db_info)
+{
+	char *chunk_dir = db_info;
 	int err, fd, len, n;
 	char *path;
 
@@ -178,11 +222,8 @@ int read_chunk(unsigned char *chunk, const unsigned char *digest)
 
 	fd = open(path, O_RDONLY);
 	if (fd < 0) {
-		int err = errno;
+		WARNING("%s: %s\n", path, strerror(errno));
 		free(path);
-		if (err == ENOENT)
-			return fetch_chunk(chunk, digest);
-		WARNING("%s: %s\n", path, strerror(err));
 		return -EIO;
 	}
 	free(path);
@@ -214,12 +255,12 @@ int read_chunk(unsigned char *chunk, const unsigned char *digest)
 	return CHUNK_SIZE;
 }
 
-int write_chunk(const unsigned char *chunk, unsigned char *digest)
+static int local_write_chunk(const unsigned char *chunk, 
+		const unsigned char *digest, void *db_info)
 {
+	char *chunk_dir = db_info;
 	int err, fd, len, n;
 	char *path;
-
-	digest_chunk(chunk, digest);
 
 	err = asprintf(&path, "%s/%s", chunk_dir, digest_string(digest));
 	if (err < 0)
@@ -253,37 +294,123 @@ int write_chunk(const unsigned char *chunk, unsigned char *digest)
 	return CHUNK_SIZE;
 }
 
-#define INT_CHUNK_SIZE	((CHUNK_SIZE + sizeof(int) - 1) / sizeof(int))
-
-int random_chunk_digest(unsigned char *digest)
+static struct chunk_db *local_chunkdb_ctor(int mode, const char *spec)
 {
-	int i, chunk_data[INT_CHUNK_SIZE] = {0};
-
-	for (i = 0; i < INT_CHUNK_SIZE; i ++)
-		chunk_data[i] = rand();
-
-	return write_chunk((void *)chunk_data, digest);
-}
-
-void set_fetch_cmd(const char *cmd)
-{
-	fetch_cmd = cmd;
-}
-
-
-static void __attribute__((constructor)) init_chunk_ops(void)
-{
-	char cwd[PATH_MAX];
+	struct chunk_db *cdb;
+	struct stat stbuf;
 	int err;
 
-	err = snprintf(chunk_dir, PATH_MAX, "%s/.chunks",
-			getcwd(cwd, PATH_MAX));
-	assert(err < PATH_MAX);
+	if (strncmp(spec, "dir:", 4))
+		return NULL;
 
-	err = mkdir(chunk_dir, S_IRWXU);
-	if (err < 0 && errno != EEXIST) {
-		PANIC("Failed to create .chunks directory: %s\n",
-				strerror(errno));
+	TRACE("mode=%d spec=%s\n", mode, spec);
+
+	err = stat(spec+4, &stbuf);
+	if (err == -1)
+		return ERR_PTR(errno);
+	if (!S_ISDIR(stbuf.st_mode))
+		return ERR_PTR(ENOTDIR);
+	if (access(spec+4, R_OK | (mode == CHUNKDB_RW ? W_OK : 0)))
+		return ERR_PTR(errno);
+
+	cdb = malloc(sizeof(struct chunk_db) + strlen(spec+4) + 1);
+	if (!cdb)
+		return ERR_PTR(ENOMEM);
+
+	cdb->db_info = (void *)(cdb + 1);
+	strcpy(cdb->db_info, spec+4);
+
+	cdb->read_chunk = local_read_chunk;
+	cdb->write_chunk = (mode == CHUNKDB_RW) ? local_write_chunk : NULL;
+
+	return cdb;
+}
+
+void register_chunkdb(chunkdb_ctor ctor)
+{
+	int n = ctor_count ++;
+
+	ctor_list = realloc(ctor_list, ctor_count * sizeof(chunkdb_ctor));
+	if (!ctor_list)
+		panic("Failed to resize list of chunk database types.\n");
+
+	ctor_list[n] = ctor;
+}
+
+int add_chunkdb(int mode, const char *spec)
+{
+	struct chunk_db *cdb;
+	int i, n;
+
+	for (i = 0; i < ctor_count; i ++) {
+		cdb = ctor_list[i](mode, spec);
+		if (cdb)
+			goto found;
 	}
+
+	return -ENOENT;
+found:
+	if (IS_ERR(cdb))
+		return -PTR_ERR(cdb);
+
+	n = chunkdb_count ++;
+	chunkdb_list = realloc(chunkdb_list,
+			chunkdb_count * sizeof(struct chunk_db *));
+	if (!chunkdb_list)
+		panic("Failed to resize list of chunk databases.\n");
+
+	chunkdb_list[n] = cdb;
+
+	return 0;
+}
+
+int read_chunk(unsigned char *chunk, const unsigned char *digest)
+{
+	struct chunk_db *cdb;
+	int i, len;
+
+	for (i = 0; i < chunkdb_count; i ++) {
+		cdb = chunkdb_list[i];
+		if (cdb->read_chunk) {
+			len = cdb->read_chunk(chunk, digest, cdb->db_info);
+			if (len > 0 && verify_chunk(chunk, digest))
+				goto cache_chunk;
+		}
+	}
+
+	return -EIO;
+cache_chunk:
+	while (i--) {
+		cdb = chunkdb_list[i];
+		if (cdb->write_chunk)
+			cdb->write_chunk(chunk, digest, cdb->db_info);
+	}
+
+	return len;
+}
+
+int write_chunk(const unsigned char *chunk, unsigned char *digest)
+{
+	struct chunk_db *cdb;
+	int i, err, best_err = 0;
+
+	digest_chunk(chunk, digest);
+
+	for (i = 0; i < chunkdb_count; i ++) {
+		cdb = chunkdb_list[i];
+		if (cdb->write_chunk) {
+			err = cdb->write_chunk(chunk, digest, cdb->db_info);
+			if (!best_err || best_err < err)
+				best_err = err;
+		}
+	}
+
+	return best_err;
+}
+
+static void __attribute__((constructor)) init_chunk_db(void)
+{
+	register_chunkdb(local_chunkdb_ctor);
+	register_chunkdb(ext_chunkdb_ctor);
 }
 

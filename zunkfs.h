@@ -33,6 +33,11 @@ extern char zunkfs_log_level;
 	abort(); \
 } while(0)
 
+#define panic(x...) do { \
+	fprintf(stderr, x); \
+	abort(); \
+} while(0)
+
 #define COMPILER_ASSERT(cond, cond_name) \
 static inline void __attribute__((unused)) COMPILER_ASSERT_##cond_name(void) { \
 	switch(0) { \
@@ -87,8 +92,25 @@ static inline int IS_ERR(const void *ptr)
 }
 
 /*
- * Chunkdb.
- *
+ * Chunk database.
+ */
+struct chunk_db {
+	int (*read_chunk)(unsigned char *chunk, const unsigned char *digest,
+			void *db_info);
+	int (*write_chunk)(const unsigned char *chunk,
+			const unsigned char *digest, void *db_info);
+	void *db_info;
+};
+
+#define CHUNKDB_RO 0
+#define CHUNKDB_RW 1
+
+typedef struct chunk_db *(*chunkdb_ctor)(int mode, const char *spec);
+
+void register_chunkdb(chunkdb_ctor ctor);
+int add_chunkdb(int mode, const char *spec);
+
+/*
  * write_chunk() updates 'digest' field.
  */
 int write_chunk(const unsigned char *chunk, unsigned char *digest);
@@ -97,8 +119,6 @@ void zero_chunk_digest(unsigned char *digest);
 int random_chunk_digest(unsigned char *digest);
 int verify_chunk(const unsigned char *chunk, const unsigned char *digest);
 const char *__digest_string(const unsigned char *digest, char *strbuf);
-
-void set_fetch_cmd(const char *cmd);
 
 #define digest_string(digest) \
 	__digest_string(digest, alloca(CHUNK_DIGEST_STRLEN + 1))

@@ -333,26 +333,6 @@ static struct fuse_operations zunkfs_operations = {
 	.chmod		= zunkfs_chmod
 };
 
-static void usage(const char *argv0)
-{
-	fprintf(stderr, "Usage: %s [options] root_ddent mountpt\n",
-			basename(argv0));
-	fprintf(stderr, "\t--log=<file|stderr|stdout>\n");
-	fprintf(stderr, "\t--fetch=</path/to/fetch/cmd>\n");
-	exit(1);
-}
-
-enum {
-	ZUNKFS_LOG,
-	ZUNKFS_FETCH_CMD
-};
-
-static struct fuse_opt zunkfs_opts[] = {
-	FUSE_OPT_KEY("--log=%s", ZUNKFS_LOG),
-	FUSE_OPT_KEY("--fetch=%s", ZUNKFS_FETCH_CMD),
-	FUSE_OPT_END
-};
-
 static void set_root_file(const char *fs_descr)
 {
 	static DECLARE_MUTEX(root_mutex);
@@ -400,23 +380,51 @@ static void set_root_file(const char *fs_descr)
 	}
 }
 
+enum {
+	ZUNKFS_LOG,
+	ZUNKFS_FETCH_CMD
+};
+
+static struct fuse_opt zunkfs_opts[] = {
+	FUSE_OPT_KEY("--log=%s", ZUNKFS_LOG),
+	FUSE_OPT_KEY("--fetch=%s", ZUNKFS_FETCH_CMD),
+	FUSE_OPT_END
+};
+
+static void usage(const char *argv0)
+{
+	fprintf(stderr, "Usage: %s [options] root_ddent mountpt\n",
+			basename(argv0));
+	fprintf(stderr, "\t--log=[level,]<file|stderr|stdout>\n");
+	fprintf(stderr, "\t\tlevel is one of (E)rror, (W)arning, (T)race\n");
+	fprintf(stderr, "\t--fetch=</path/to/fetch/cmd>\n");
+	exit(1);
+}
+
 static int opt_proc(void *data, const char *arg, int key,
 		struct fuse_args *args)
 {
 	static unsigned root_set = 0;
-	fprintf(stderr, "opt_proc(%d, %s)\n", key, arg);
+
 	switch(key) {
 	case ZUNKFS_LOG:
 		if (zunkfs_log_fd) {
 			fprintf(stderr, "Log file specified more than once.\n");
 			return -1;
 		}
-		if (!strcmp(arg + 6, "stderr"))
+		arg += 6;
+		if (arg[1] == ',') {
+			if (!strchr("EWT", arg[0]))
+				return -1;
+			zunkfs_log_level = arg[0];
+			arg += 2;
+		}
+		if (!strcmp(arg, "stderr"))
 			zunkfs_log_fd = stderr;
-		else if (!strcmp(arg + 6, "stdout"))
+		else if (!strcmp(arg, "stdout"))
 			zunkfs_log_fd = stdout;
 		else
-			zunkfs_log_fd = fopen(arg + 6, "w");
+			zunkfs_log_fd = fopen(arg, "w");
 		return 0;
 	case ZUNKFS_FETCH_CMD:
 		set_fetch_cmd(arg + 8);

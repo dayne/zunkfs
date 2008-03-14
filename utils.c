@@ -13,6 +13,7 @@
 #include "zunkfs.h"
 
 FILE *zunkfs_log_fd = NULL;
+char zunkfs_log_level = 0;
 
 void __zprintf(char level, const char *function, int line, const char *fmt, ...)
 {

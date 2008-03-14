@@ -97,6 +97,8 @@ int random_chunk_digest(unsigned char *digest);
 int verify_chunk(const unsigned char *chunk, const unsigned char *digest);
 const char *__digest_string(const unsigned char *digest, char *strbuf);
 
+void set_fetch_cmd(const char *cmd);
+
 #define digest_string(digest) \
 	__digest_string(digest, alloca(CHUNK_DIGEST_STRLEN + 1))
 

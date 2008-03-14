@@ -5,6 +5,7 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <fuse.h>
+#include <fuse_opt.h>
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
@@ -334,40 +335,30 @@ static struct fuse_operations zunkfs_operations = {
 
 static void usage(const char *argv0)
 {
-	fprintf(stderr, "%s uses the following environment variables:\n",
+	fprintf(stderr, "Usage: %s [options] root_ddent mountpt\n",
 			basename(argv0));
-	fprintf(stderr, "\tZUNKFS_SUPER=<path to superblock>\n");
-	fprintf(stderr, "\tZUNKFS_LOG=<file|stderr|stdout> [optional]\n");
-	fprintf(stderr, "\tZUNKFS_FETCH=<path to fetcher>\n");
+	fprintf(stderr, "\t--log=<file|stderr|stdout>\n");
+	fprintf(stderr, "\t--fetch=</path/to/fetch/cmd>\n");
 	exit(1);
 }
 
-int main(int argc, char **argv)
+enum {
+	ZUNKFS_LOG,
+	ZUNKFS_FETCH_CMD
+};
+
+static struct fuse_opt zunkfs_opts[] = {
+	FUSE_OPT_KEY("--log=%s", ZUNKFS_LOG),
+	FUSE_OPT_KEY("--fetch=%s", ZUNKFS_FETCH_CMD),
+	FUSE_OPT_END
+};
+
+static void set_root_file(const char *fs_descr)
 {
+	static DECLARE_MUTEX(root_mutex);
 	struct disk_dentry *root_ddent;
-	DECLARE_MUTEX(root_mutex);
-	char *fs_descr = NULL;
-	char *log_file = NULL;
-	int fd, err;
+	int err, fd;
 
-	fs_descr = getenv("ZUNKFS_SUPER");
-	log_file = getenv("ZUNKFS_LOG");
-
-	if (log_file) {
-		if (!strcmp(log_file, "stderr"))
-			zunkfs_log_fd = stderr;
-		else if (!strcmp(log_file, "stdout"))
-			zunkfs_log_fd = stdout;
-		else
-			zunkfs_log_fd = fopen(log_file, "w");
-	}
-
-	if (!fs_descr)
-		usage(argv[0]);
-
-	/*
-	 * XXX: This should be moved to open_zunkfs().
-	 */
 	fd = open(fs_descr, O_RDWR|O_CREAT, 0600);
 	if (fd < 0) {
 		ERROR("open(%s): %s\n", fs_descr, strerror(errno));
@@ -407,8 +398,47 @@ int main(int argc, char **argv)
 		ERROR("Failed to set root: %s\n", strerror(-err));
 		exit(-5);
 	}
+}
 
-	err = fuse_main(argc, argv, &zunkfs_operations, NULL);
+static int opt_proc(void *data, const char *arg, int key,
+		struct fuse_args *args)
+{
+	static unsigned root_set = 0;
+	fprintf(stderr, "opt_proc(%d, %s)\n", key, arg);
+	switch(key) {
+	case ZUNKFS_LOG:
+		if (zunkfs_log_fd) {
+			fprintf(stderr, "Log file specified more than once.\n");
+			return -1;
+		}
+		if (!strcmp(arg + 6, "stderr"))
+			zunkfs_log_fd = stderr;
+		else if (!strcmp(arg + 6, "stdout"))
+			zunkfs_log_fd = stdout;
+		else
+			zunkfs_log_fd = fopen(arg + 6, "w");
+		return 0;
+	case ZUNKFS_FETCH_CMD:
+		set_fetch_cmd(arg + 8);
+		return 0;
+	default:
+		if (arg[0] == '-' || root_set)
+			return 1;
+		set_root_file(arg);
+		root_set = 1;
+		return 0;
+	}
+}
+
+int main(int argc, char **argv)
+{
+	struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
+	int err;
+
+	if (fuse_opt_parse(&args, NULL, zunkfs_opts, opt_proc))
+		usage(argv[0]);
+
+	err = fuse_main(args.argc, args.argv, &zunkfs_operations, NULL);
 	flush_root();
 	return err;
 }

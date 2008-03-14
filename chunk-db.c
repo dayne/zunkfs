@@ -19,9 +19,8 @@
 
 #include "zunkfs.h"
 
-static unsigned long nr_reads = 0;
-static unsigned long nr_writes = 0;
 static char chunk_dir[PATH_MAX];
+static const char *fetch_cmd = NULL;
 
 static inline int cmp_digest(const unsigned char *a, const unsigned char *b)
 {
@@ -62,7 +61,6 @@ const char *__digest_string(const unsigned char *digest, char *strbuf)
 
 static int fetch_chunk(unsigned char *chunk, const unsigned char *digest)
 {
-	const char *cmd;
 	char chunk_name[CHUNK_DIGEST_STRLEN+1];
 	int err;
 	int fd[2];
@@ -70,13 +68,12 @@ static int fetch_chunk(unsigned char *chunk, const unsigned char *digest)
 	int len;
 	int n;
 
-	cmd = getenv("ZUNKFS_FETCH");
-	if  (!cmd)
+	if  (!fetch_cmd)
 		return -EIO;
 
 	__digest_string(digest, chunk_name);
 
-	TRACE("chunk=%s using %s\n", chunk_name, cmd);
+	TRACE("chunk=%s using %s\n", chunk_name, fetch_cmd);
 
 	err = pipe(fd);
 	if (err) {
@@ -157,11 +154,11 @@ static int fetch_chunk(unsigned char *chunk, const unsigned char *digest)
 		}
 	}
 
-	execl(cmd, cmd, chunk_dir, chunk_name, NULL);
+	execl(fetch_cmd, fetch_cmd, chunk_dir, chunk_name, NULL);
 
 	err = errno;
 
-	ERROR("\"%s %s %s\" failed: %s\n", cmd, chunk_dir, chunk_name,
+	ERROR("\"%s %s %s\" failed: %s\n", fetch_cmd, chunk_dir, chunk_name,
 			strerror(err));
 
 	exit(-err);
@@ -174,8 +171,6 @@ int read_chunk(unsigned char *chunk, const unsigned char *digest)
 {
 	int err, fd, len, n;
 	char *path;
-
-	nr_reads ++;
 
 	err = asprintf(&path, "%s/%s", chunk_dir, digest_string(digest));
 	if (err < 0)
@@ -224,8 +219,6 @@ int write_chunk(const unsigned char *chunk, unsigned char *digest)
 	int err, fd, len, n;
 	char *path;
 
-	nr_writes ++;
-
 	digest_chunk(chunk, digest);
 
 	err = asprintf(&path, "%s/%s", chunk_dir, digest_string(digest));
@@ -272,6 +265,12 @@ int random_chunk_digest(unsigned char *digest)
 	return write_chunk((void *)chunk_data, digest);
 }
 
+void set_fetch_cmd(const char *cmd)
+{
+	fetch_cmd = cmd;
+}
+
+
 static void __attribute__((constructor)) init_chunk_ops(void)
 {
 	char cwd[PATH_MAX];
@@ -286,11 +285,5 @@ static void __attribute__((constructor)) init_chunk_ops(void)
 		PANIC("Failed to create .chunks directory: %s\n",
 				strerror(errno));
 	}
-}
-
-static void __attribute__((destructor)) fini_chunk_ops(void)
-{
-	fprintf(stderr, "nr_reads: %lu\n", nr_reads);
-	fprintf(stderr, "nr_writes: %lu\n", nr_writes);
 }
 

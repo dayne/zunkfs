@@ -17,11 +17,6 @@
 #include "zunkfs.h"
 #include "zunkfs-tests.h"
 
-#define panic(x...) do { \
-	fprintf(stderr, "PANIC: " x); \
-	abort(); \
-} while(0)
-
 static const char spaces[] = "                                                                                                                                                               ";
 #define indent_start (spaces + sizeof(spaces) - 1)
 

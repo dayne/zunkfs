@@ -17,24 +17,24 @@ void __zprintf(char level, const char *funct, int line, const char *fmt, ...);
 extern FILE *zunkfs_log_fd;
 extern char zunkfs_log_level;
 
-#define zprintf(level, function, line, fmt...) do { \
+#define zprintf(level, function, line, fmt...) ({ \
+	int ___ret = 0; \
 	if (zunkfs_log_fd && (level) <= zunkfs_log_level) { \
 		int ___saved_errno = errno; \
 		__zprintf(level, function, line, fmt); \
 		errno = ___saved_errno; \
+		___ret = 1; \
 	} \
-} while(0)
+	___ret; \
+})
 
 #define WARNING(x...) zprintf('W', __FUNCTION__, __LINE__, x)
 #define ERROR(x...)   zprintf('E', __FUNCTION__, __LINE__, x)
 #define TRACE(x...)   zprintf('T', __FUNCTION__, __LINE__, x)
-#define PANIC(x...) do { \
-	zprintf('E', __FUNCTION__, __LINE__, x); \
-	abort(); \
-} while(0)
 
 #define panic(x...) do { \
-	fprintf(stderr, x); \
+	if (!zprintf('E', __FUNCTION__, __LINE__, x)) \
+		fprintf(stderr, x); \
 	abort(); \
 } while(0)
 

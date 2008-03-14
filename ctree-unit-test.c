@@ -13,11 +13,6 @@
 
 #define NR_NODES	50 * DIGESTS_PER_CHUNK
 
-#define panic(x...) do { \
-	fprintf(stderr, "PANIC: " x); \
-	abort(); \
-} while(0)
-
 static const char spaces[] = "                                                                                                                                                               ";
 #define indent_start (spaces + sizeof(spaces) - 1)
 

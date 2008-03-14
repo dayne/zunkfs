@@ -14,11 +14,6 @@
 #include "zunkfs.h"
 #include "zunkfs-tests.h"
 
-#define panic(x...) do { \
-	fprintf(stderr, "PANIC: " x); \
-	abort(); \
-} while(0)
-
 #define cnode_array(cnode) \
 	((struct chunk_node **)(cnode)->_private)
 #define dentry_array(cnode) \

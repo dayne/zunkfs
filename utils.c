@@ -71,7 +71,7 @@ void lock(struct mutex *m)
 {
 	int err = pthread_mutex_lock(&m->mutex);
 	if (err) 
-		PANIC("pthread_mutex_lock: %s\n", strerror(err));
+		panic("pthread_mutex_lock: %s\n", strerror(err));
 	m->owner = pthread_self();
 }
 
@@ -81,14 +81,14 @@ void unlock(struct mutex *m)
 	m->owner = (pthread_t)-1;
 	err = pthread_mutex_unlock(&m->mutex);
 	if (err) 
-		PANIC("pthread_mutex_lock: %s\n", strerror(err));
+		panic("pthread_mutex_lock: %s\n", strerror(err));
 }
 
 int trylock(struct mutex *m)
 {
 	int err = pthread_mutex_trylock(&m->mutex);
 	if (err && err != EBUSY) 
-		PANIC("pthread_mutex_lock: %s\n", strerror(err));
+		panic("pthread_mutex_lock: %s\n", strerror(err));
 	if (!err)
 		m->owner = pthread_self();
 	return !err;

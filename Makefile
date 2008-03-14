@@ -9,6 +9,8 @@ endif
 
 CORE_OBJS=chunk-tree.o \
 	  chunk-db.o \
+	  chunk-db-local.o \
+	  chunk-db-cmd.o \
 	  dir.o \
 	  file.o \
 	  utils.o

@@ -8,11 +8,12 @@
 #include <stdint.h>
 #include <string.h>
 #include <unistd.h>
-#include <pthread.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 
 #include "zunkfs.h"
+#include "chunk-db.h"
+#include "utils.h"
 
 static int local_read_chunk(unsigned char *chunk, const unsigned char *digest,
 		void *db_info)

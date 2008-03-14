@@ -10,6 +10,7 @@
 
 #include "zunkfs.h"
 #include "zunkfs-tests.h"
+#include "dir.h"
 
 #define NR_NODES	50 * DIGESTS_PER_CHUNK
 

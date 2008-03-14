@@ -10,6 +10,8 @@
 #include <pthread.h>
 
 #include "zunkfs.h"
+#include "chunk-tree.h"
+#include "utils.h"
 
 #define children_of(cnode) \
 	((struct chunk_node **)(cnode)->_private)

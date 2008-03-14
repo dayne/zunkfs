@@ -13,6 +13,8 @@
 #include <sys/wait.h>
 
 #include "zunkfs.h"
+#include "chunk-db.h"
+#include "utils.h"
 
 static int fetch_chunk(unsigned char *chunk, const unsigned char *digest,
 		void *db_info)

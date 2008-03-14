@@ -13,7 +13,7 @@
 
 #include <sys/stat.h>
 
-#include "zunkfs.h"
+#include "dir.h"
 
 static struct dentry *root_dentry = NULL;
 

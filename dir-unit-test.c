@@ -16,6 +16,7 @@
 
 #include "zunkfs.h"
 #include "zunkfs-tests.h"
+#include "dir.h"
 
 static const char spaces[] = "                                                                                                                                                               ";
 #define indent_start (spaces + sizeof(spaces) - 1)

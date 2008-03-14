@@ -1,4 +1,8 @@
 
+struct chunk_node;
+struct chunk_tree;
+struct dentry;
+
 void dump_digest(const unsigned char *digest);
 void dump_cnode(struct chunk_node *cnode, const char *indent, int height,
 		void (*dump_leaf)(void **, const char *));

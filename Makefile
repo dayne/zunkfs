@@ -13,7 +13,8 @@ CORE_OBJS=chunk-tree.o \
 	  chunk-db-cmd.o \
 	  dir.o \
 	  file.o \
-	  utils.o
+	  utils.o \
+	  mutex.o
 
 UNIT_TEST_OBJS=$(CORE_OBJS) unit-test-utils.o
 

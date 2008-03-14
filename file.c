@@ -13,6 +13,8 @@
 #include <sys/stat.h>
 
 #include "zunkfs.h"
+#include "file.h"
+#include "dir.h"
 
 #define lock_file(of)  lock(&(of)->dentry->mutex)
 #define unlock_file(of)  unlock(&(of)->dentry->mutex)

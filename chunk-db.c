@@ -18,6 +18,8 @@
 #include <sys/wait.h>
 
 #include "zunkfs.h"
+#include "chunk-db.h"
+#include "utils.h"
 
 static chunkdb_ctor *ctor_list = NULL;
 static int ctor_count = 0;

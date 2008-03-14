@@ -22,6 +22,10 @@
 #include <sys/mman.h>
 
 #include "zunkfs.h"
+#include "chunk-db.h"
+#include "utils.h"
+#include "dir.h"
+#include "file.h"
 
 static int zunkfs_getattr(const char *path, struct stat *stbuf)
 {

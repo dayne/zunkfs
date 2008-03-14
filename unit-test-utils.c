@@ -13,6 +13,8 @@
 
 #include "zunkfs.h"
 #include "zunkfs-tests.h"
+#include "chunk-tree.h"
+#include "dir.h"
 
 #define cnode_array(cnode) \
 	((struct chunk_node **)(cnode)->_private)

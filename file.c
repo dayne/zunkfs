@@ -18,6 +18,7 @@
 
 #define lock_file(of)  lock(&(of)->dentry->mutex)
 #define unlock_file(of)  unlock(&(of)->dentry->mutex)
+#define assert_file_locked(of) assert(have_mutex(&(of)->dentry->mutex))
 
 static struct open_file *open_file_dentry(struct dentry *dentry)
 {
@@ -67,17 +68,26 @@ struct open_file *create_file(const char *path, mode_t mode)
 	return ofile;
 }
 
+static void release_cached_chunks(struct open_file *ofile)
+{
+	int i;
+
+	assert_file_locked(ofile);
+
+	for (i = 0; i < FILE_CHUNK_CACHE_SIZE; i ++) {
+		if (ofile->ccache[i]) {
+			put_chunk_node(ofile->ccache[i]);
+			ofile->ccache[i] = NULL;
+		}
+	}
+}
+
 int close_file(struct open_file *ofile)
 {
-	unsigned i, retv = 0;
+	unsigned retv = 0;
 
 	lock_file(ofile);
-	for (i = 0; i < FILE_CHUNK_CACHE_SIZE; i ++) {
-		if (!ofile->ccache[i])
-			break;
-		put_chunk_node(ofile->ccache[i]);
-		ofile->ccache[i] = NULL;
-	}
+	release_cached_chunks(ofile);
 	if (ofile->dentry->chunk_tree.root)
 		retv = flush_chunk_tree(&ofile->dentry->chunk_tree);
 	unlock_file(ofile);
@@ -92,15 +102,10 @@ int close_file(struct open_file *ofile)
 
 int flush_file(struct open_file *ofile)
 {
-	unsigned i, retv = 0;
+	unsigned retv = 0;
 
 	lock_file(ofile);
-	for (i = 0; i < FILE_CHUNK_CACHE_SIZE; i ++) {
-		if (!ofile->ccache[i])
-			break;
-		put_chunk_node(ofile->ccache[i]);
-		ofile->ccache[i] = NULL;
-	}
+	release_cached_chunks(ofile);
 	if (ofile->dentry->chunk_tree.root)
 		retv = flush_chunk_tree(&ofile->dentry->chunk_tree);
 	unlock_file(ofile);
@@ -112,7 +117,7 @@ static void cache_file_chunk(struct open_file *ofile, struct chunk_node *cnode)
 {
 	unsigned index;
 
-	assert(have_mutex(&ofile->dentry->mutex));
+	assert_file_locked(ofile);
 
 	index = ofile->ccache_index++ % FILE_CHUNK_CACHE_SIZE;
 	if (ofile->ccache[index])

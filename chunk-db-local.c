@@ -26,6 +26,8 @@ static int local_read_chunk(unsigned char *chunk, const unsigned char *digest,
 	if (err < 0)
 		return -errno;
 
+	TRACE("path=%s\n", path);
+
 	fd = open(path, O_RDONLY);
 	if (fd < 0) {
 		WARNING("%s: %s\n", path, strerror(errno));
@@ -62,6 +64,8 @@ static int local_write_chunk(const unsigned char *chunk,
 	err = asprintf(&path, "%s/%s", chunk_dir, digest_string(digest));
 	if (err < 0)
 		return -errno;
+
+	TRACE("path=%s\n", path);
 
 	fd = open(path, O_WRONLY|O_CREAT, S_IRUSR|S_IWUSR);
 	if (fd < 0) {

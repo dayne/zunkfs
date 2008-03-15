@@ -42,12 +42,18 @@ static inline unsigned char *digest_chunk(const unsigned char *chunk,
 int verify_chunk(const unsigned char *chunk, const unsigned char *digest)
 {
 	unsigned char tmp_digest[CHUNK_DIGEST_LEN];
-	return !cmp_digest(digest, digest_chunk(chunk, tmp_digest));
+	if (cmp_digest(digest, digest_chunk(chunk, tmp_digest))) {
+		TRACE("chunk failed verification: %s vs %s\n",
+				digest_string(digest),
+				digest_string(tmp_digest));
+		return 0;
+	}
+	return 1;
 }
 
 const char *__digest_string(const unsigned char *digest, char *strbuf)
 {
-	static const char digit[] = "012345678abcdef";
+	static const char digit[] = "0123456789abcdef";
 	char *ptr;
 	int i;
 
@@ -124,6 +130,7 @@ int read_chunk(unsigned char *chunk, const unsigned char *digest)
 		}
 	}
 
+	TRACE("chunk not found: %s\n", digest_string(digest));
 	return -EIO;
 cache_chunk:
 	while (i--) {
@@ -141,6 +148,8 @@ int write_chunk(const unsigned char *chunk, unsigned char *digest)
 	int i, err, best_err = 0;
 
 	digest_chunk(chunk, digest);
+
+	TRACE("digest=%s\n", digest_string(digest));
 
 	for (i = 0; i < chunkdb_count; i ++) {
 		cdb = chunkdb_list[i];

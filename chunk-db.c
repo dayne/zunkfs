@@ -145,7 +145,7 @@ cache_chunk:
 int write_chunk(const unsigned char *chunk, unsigned char *digest)
 {
 	struct chunk_db *cdb;
-	int i, err, best_err = 0;
+	int i, err;
 
 	digest_chunk(chunk, digest);
 
@@ -155,11 +155,11 @@ int write_chunk(const unsigned char *chunk, unsigned char *digest)
 		cdb = chunkdb_list[i];
 		if (cdb->write_chunk) {
 			err = cdb->write_chunk(chunk, digest, cdb->db_info);
-			if (!best_err || best_err < err)
-				best_err = err;
+			if (err > 0)
+				return err;
 		}
 	}
 
-	return best_err;
+	return -EIO;
 }
 

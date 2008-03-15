@@ -1,7 +1,7 @@
 FUSE_CFLAGS=$(shell pkg-config fuse --cflags) -D_FILE_OFFSET_BITS=64
 FUSE_LIBS=$(shell pkg-config fuse --libs)
 CFLAGS=-g -Wall $(FUSE_CFLAGS)
-LDFLAGS=-lssl $(FUSE_LIBS)
+LDFLAGS=-lssl -lsqlite3 $(FUSE_LIBS)
 
 ifdef CHUNK_SIZE
 CFLAGS+=-DCHUNK_SIZE=$(CHUNK_SIZE)
@@ -11,6 +11,7 @@ CORE_OBJS=chunk-tree.o \
 	  chunk-db.o \
 	  chunk-db-local.o \
 	  chunk-db-cmd.o \
+	  chunk-db-map.o \
 	  dir.o \
 	  file.o \
 	  utils.o \
@@ -25,7 +26,7 @@ all: ${FINAL_OBJS}
 tests: ctree-unit-test dir-unit-test file-unit-test
 
 zunkfs: $(CORE_OBJS) fuse.o
-	$(CC) -o $@ $^ $(LDFLAGS) #-lsqlite3
+	$(CC) -o $@ $^ $(LDFLAGS)
 
 ctree-unit-test: $(UNIT_TEST_OBJS) ctree-unit-test.o
 	$(CC) $(CFLAGS) -o $@ $^  $(LDFLAGS)

@@ -12,6 +12,7 @@ CORE_OBJS=chunk-tree.o \
 	  chunk-db-local.o \
 	  chunk-db-cmd.o \
 	  chunk-db-map.o \
+	  chunk-db-sqlite.o \
 	  dir.o \
 	  file.o \
 	  utils.o \

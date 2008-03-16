@@ -63,6 +63,7 @@ static int read_chunk_from_file(const char *path, unsigned nr,
 		if (n < 0) {
 			if (errno == EINTR)
 				continue;
+			close(fd);
 			return -EIO;
 		}
 		if (!n)

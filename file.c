@@ -24,14 +24,10 @@ static struct open_file *open_file_dentry(struct dentry *dentry)
 {
 	struct open_file *ofile;
 
-	if (S_ISDIR(dentry->ddent->mode))
-		return ERR_PTR(EISDIR);
-	if (!S_ISREG(dentry->ddent->mode))
-		return ERR_PTR(EPERM);
-
 	ofile = calloc(1, sizeof(struct open_file));
 	if (!ofile)
 		return ERR_PTR(ENOMEM);
+
 	ofile->dentry = dentry;
 	return ofile;
 }
@@ -40,8 +36,9 @@ struct open_file *open_file(const char *path)
 {
 	struct dentry *dentry;
 	struct open_file *ofile;
+	int super_secret = 0;
 
-	dentry = find_dentry(path);
+	dentry = find_dentry_super_secret(path, &super_secret);
 	if (IS_ERR(dentry))
 		return (void *)dentry;
 
@@ -56,6 +53,8 @@ struct open_file *create_file(const char *path, mode_t mode)
 {
 	struct dentry *dentry;
 	struct open_file *ofile;
+
+	assert(S_ISREG(mode) && !S_ISDIR(mode));
 
 	dentry = create_dentry(path, mode | S_IFREG);
 	if (IS_ERR(dentry))
@@ -135,8 +134,11 @@ static int rw_file(struct open_file *ofile, char *buf, size_t bufsz,
 	int len, cplen;
 
 	file_size = ofile->dentry->size;
+	if (S_ISDIR(ofile->dentry->ddent->mode))
+		file_size *= sizeof(struct disk_dentry);
 	if (offset > file_size)
 		return -EINVAL;
+	TRACE("read=%d offset=%llu file_size=%llu\n", read, offset, file_size);
 	if (read && offset == file_size)
 		return 0;
 	if (bufsz > INT_MAX)
@@ -172,8 +174,12 @@ static int rw_file(struct open_file *ofile, char *buf, size_t bufsz,
 	}
 
 	if (!read) {
-		if ((len + offset) > file_size)
-			ofile->dentry->size = len + offset;
+		if ((len + offset) > file_size) {
+			file_size = len + offset;
+			if (S_ISDIR(ofile->dentry->ddent->mode))
+				file_size /= sizeof(struct disk_dentry);
+			ofile->dentry->size = file_size;
+		}
 		ofile->dentry->mtime = time(NULL);
 		ofile->dentry->dirty = 1;
 	}

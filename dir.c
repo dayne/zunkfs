@@ -524,6 +524,27 @@ struct dentry *find_dentry_parent(const char *path, struct dentry **pparent,
 	}
 }
 
+struct dentry *find_dentry_super_secret(const char *path, int *is_super_secret)
+{
+	struct dentry *dentry;
+	struct dentry *parent;
+	const char *name;
+
+	dentry = find_dentry_parent(path, &parent, &name);
+	if (IS_ERR(dentry))
+		return dentry;
+	if (dentry) {
+		put_dentry(parent);
+		return dentry;
+	}
+	if (!strcmp(name, SUPER_SECRET_FILE)) {
+		*is_super_secret = 1;
+		return parent;
+	}
+	put_dentry(parent);
+	return ERR_PTR(ENOENT);
+}
+
 int set_root(struct disk_dentry *ddent, struct mutex *ddent_mutex)
 {
 	int err;
@@ -722,4 +743,5 @@ void dentry_chmod(struct dentry *dentry, mode_t mode)
 	dentry->ddent->mode = (dentry->ddent->mode & S_IFMT) | mode;
 	unlock(dentry->ddent_mutex);
 }
+
 

@@ -1,10 +1,14 @@
 #ifndef __ZUNKFS_DIR_H__
 #define __ZUNKFS_DIR_H__
 
+#include <stdint.h>
+
 #include "zunkfs.h"
 #include "chunk-tree.h"
 #include "mutex.h"
 #include "utils.h"
+
+#define SUPER_SECRET_FILE	".super_secret_file"
 
 /* I'd like disk_dentry to fit into 256 bytes. */
 #define DDENT_NAME_MAX	(256 - 60)
@@ -76,6 +80,8 @@ struct dentry *find_dentry_parent(const char *path, struct dentry **pparent,
 		const char **name);
 
 struct dentry *create_dentry(const char *path, mode_t mode);
+
+struct dentry *find_dentry_super_secret(const char *path, int *is_super_secret);
 
 static inline struct dentry *find_dentry(const char *path)
 {

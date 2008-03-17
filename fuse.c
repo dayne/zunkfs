@@ -30,10 +30,11 @@
 static int zunkfs_getattr(const char *path, struct stat *stbuf)
 {
 	struct dentry *dentry;
+	int super_secret = 0;
 
 	TRACE("%s\n", path);
 
-	dentry = find_dentry(path);
+	dentry = find_dentry_super_secret(path, &super_secret);
 	if (IS_ERR(dentry))
 		return -PTR_ERR(dentry);
 
@@ -52,6 +53,12 @@ static int zunkfs_getattr(const char *path, struct stat *stbuf)
 	stbuf->st_ctime = dentry->ddent->ctime;
 	stbuf->st_blksize = 4096;
 	stbuf->st_blocks = (dentry->size + 4095) / 4096;
+
+	if (super_secret) {
+		stbuf->st_mode &= ~S_IFDIR;
+		stbuf->st_mode |= S_IFREG;
+		stbuf->st_size *= sizeof(struct disk_dentry);
+	}
 
 	unlock(&dentry->mutex);
 	put_dentry(dentry);

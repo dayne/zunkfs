@@ -43,7 +43,7 @@ dir-unit-test: $(UNIT_TEST_OBJS) dir-unit-test.o
 file-unit-test: $(UNIT_TEST_OBJS) file-unit-test.o
 	$(CC) $(CFLAGS) -o $@ $^  $(LDFLAGS)
 
-zunkfs-list-ddents: $(CORE_OBJS) zunkfs-list-ddents.o 
+zunkfs-list-ddents: $(CORE_OBJS) $(DBTYPES) zunkfs-list-ddents.o 
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 clean:

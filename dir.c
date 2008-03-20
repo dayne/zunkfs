@@ -605,6 +605,7 @@ struct dentry *create_dentry(const char *path, mode_t mode)
 	struct dentry *dentry;
 	struct dentry *parent;
 	const char *name;
+	unsigned namelen;
 
 	dentry = find_dentry_parent(path, &parent, &name);
 	if (IS_ERR(dentry))
@@ -614,7 +615,24 @@ struct dentry *create_dentry(const char *path, mode_t mode)
 		put_dentry(dentry);
 		return ERR_PTR(EEXIST);
 	}
-	dentry = add_dentry(parent, name, mode);
+	if (!name[0]) {
+		put_dentry(parent);
+		return ERR_PTR(EINVAL);
+	}
+	namelen = strlen(name);
+	if (namelen >= DDENT_NAME_MAX) {
+		put_dentry(parent);
+		return ERR_PTR(ENAMETOOLONG);
+	}
+
+	lock(&parent->mutex);
+	dentry = __lookup(parent, name, namelen);
+	if (dentry) {
+		__put_dentry(dentry);
+		dentry = ERR_PTR(EEXIST);
+	} else
+		dentry = __add_dentry(parent, name, mode);
+	unlock(&parent->mutex);
 	put_dentry(parent);
 	return dentry;
 }

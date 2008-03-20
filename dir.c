@@ -166,7 +166,7 @@ struct chunk_node *get_dentry_chunk(struct dentry *dentry, unsigned chunk_nr)
 	return get_nth_chunk(&dentry->chunk_tree, chunk_nr);
 }
 
-struct dentry *__get_nth_dentry(struct dentry *parent, unsigned nr)
+static struct dentry *__get_nth_dentry(struct dentry *parent, unsigned nr)
 {
 	struct dentry *dentry;
 	struct disk_dentry *ddent;
@@ -323,10 +323,78 @@ void put_dentry(struct dentry *dentry)
 	}
 }
 
-struct dentry *__add_dentry(struct dentry *parent, const char *name, mode_t mode)
+static struct dentry *__lookup(struct dentry *parent, const char *name, int len)
+{
+	struct dentry *prev = NULL;
+	struct dentry *dentry;
+	unsigned nr;
+
+	assert(S_ISDIR(parent->ddent->mode));
+	assert(have_mutex(&parent->mutex));
+
+	if (!strncmp(name, ".", len)) {
+		locked_inc(&parent->ref_count, parent->ddent_mutex);
+		return parent;
+	}
+
+	if (!strncmp(name, "..", len)) {
+		dentry = parent->parent ?: parent;
+		locked_inc(&dentry->ref_count, dentry->ddent_mutex);
+		return dentry;
+	}
+
+	for (nr = 0; nr < parent->size; nr ++) {
+		dentry = __get_nth_dentry(parent, nr);
+		if (IS_ERR(dentry))
+			goto out;
+		if (!namcmp(dentry->ddent->name, name, len) &&
+				!dentry->ddent->name[len])
+			goto out;
+		if (prev)
+			__put_dentry(prev);
+		prev = dentry;
+	}
+
+	dentry = NULL;
+out:
+	if (prev)
+		__put_dentry(prev);
+	return dentry;
+}
+
+struct dentry *lookup(struct dentry *parent, const char *name, int len)
 {
 	struct dentry *dentry;
+
+	lock(&parent->mutex);
+	dentry = __lookup(parent, name, len);
+	unlock(&parent->mutex);
+
+	return dentry;
+}
+
+struct dentry *add_dentry(struct dentry *parent, const char *name, mode_t mode)
+{
+	struct dentry *dentry;
+	unsigned name_len;
 	time_t now;
+
+	assert(have_mutex(&parent->mutex));
+
+	if (!name[0])
+		return ERR_PTR(EINVAL);
+
+	name_len = strnlen(name, DDENT_NAME_MAX);
+	if (name_len == DDENT_NAME_MAX)
+		return ERR_PTR(ENAMETOOLONG);
+
+	dentry = __lookup(parent, name, name_len);
+	if (dentry) {
+		if (IS_ERR(dentry))
+			return dentry;
+		__put_dentry(dentry);
+		return ERR_PTR(EEXIST);
+	}
 
 	dentry = __get_nth_dentry(parent, parent->size);
 	if (IS_ERR(dentry))
@@ -348,20 +416,6 @@ struct dentry *__add_dentry(struct dentry *parent, const char *name, mode_t mode
 	parent->dirty = 1;
 	parent->size ++;
 	parent->mtime = now;
-
-	return dentry;
-}
-
-struct dentry *add_dentry(struct dentry *parent, const char *name, mode_t mode)
-{
-	struct dentry *dentry;
-
-	if (strlen(name) >= DDENT_NAME_MAX)
-		return ERR_PTR(ENAMETOOLONG);
-
-	lock(&parent->mutex);
-	dentry = __add_dentry(parent, name, mode);
-	unlock(&parent->mutex);
 
 	return dentry;
 }
@@ -451,58 +505,6 @@ int del_dentry(struct dentry *dentry)
 out:
 	unlock(&parent->mutex);
 	return err;
-}
-
-struct dentry *__lookup(struct dentry *parent, const char *name, int len)
-{
-	struct dentry *prev = NULL;
-	struct dentry *dentry;
-	unsigned nr;
-
-	assert(S_ISDIR(parent->ddent->mode));
-	assert(have_mutex(&parent->mutex));
-
-	if (!strncmp(name, ".", len)) {
-		locked_inc(&parent->ref_count, parent->ddent_mutex);
-		return parent;
-	}
-
-	if (!strncmp(name, "..", len)) {
-		TRACE("name=%s len=%d strncmp(name, .., len)=%u\n",
-				name, len, strncmp(name, "..", len));
-		dentry = parent->parent ?: parent;
-		locked_inc(&dentry->ref_count, dentry->ddent_mutex);
-		return dentry;
-	}
-
-	for (nr = 0; nr < parent->size; nr ++) {
-		dentry = __get_nth_dentry(parent, nr);
-		if (IS_ERR(dentry))
-			goto out;
-		if (!namcmp(dentry->ddent->name, name, len) &&
-				!dentry->ddent->name[len])
-			goto out;
-		if (prev)
-			__put_dentry(prev);
-		prev = dentry;
-	}
-
-	dentry = NULL;
-out:
-	if (prev)
-		__put_dentry(prev);
-	return dentry;
-}
-
-struct dentry *lookup(struct dentry *parent, const char *name, int len)
-{
-	struct dentry *dentry;
-
-	lock(&parent->mutex);
-	dentry = __lookup(parent, name, len);
-	unlock(&parent->mutex);
-
-	return dentry;
 }
 
 struct dentry *find_dentry_parent(const char *path, struct dentry **pparent,
@@ -605,7 +607,6 @@ struct dentry *create_dentry(const char *path, mode_t mode)
 	struct dentry *dentry;
 	struct dentry *parent;
 	const char *name;
-	unsigned namelen;
 
 	dentry = find_dentry_parent(path, &parent, &name);
 	if (IS_ERR(dentry))
@@ -615,23 +616,9 @@ struct dentry *create_dentry(const char *path, mode_t mode)
 		put_dentry(dentry);
 		return ERR_PTR(EEXIST);
 	}
-	if (!name[0]) {
-		put_dentry(parent);
-		return ERR_PTR(EINVAL);
-	}
-	namelen = strlen(name);
-	if (namelen >= DDENT_NAME_MAX) {
-		put_dentry(parent);
-		return ERR_PTR(ENAMETOOLONG);
-	}
 
 	lock(&parent->mutex);
-	dentry = __lookup(parent, name, namelen);
-	if (dentry) {
-		__put_dentry(dentry);
-		dentry = ERR_PTR(EEXIST);
-	} else
-		dentry = __add_dentry(parent, name, mode);
+	dentry = add_dentry(parent, name, mode);
 	unlock(&parent->mutex);
 	put_dentry(parent);
 	return dentry;

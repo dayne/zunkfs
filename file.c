@@ -196,7 +196,6 @@ static int write_dir(struct open_file *ofile, const char *buf, size_t len,
 	const struct disk_dentry *new_ddent;
 	struct disk_dentry *ddent;
 	struct dentry *dentry;
-	unsigned name_len;
 	size_t total = 0;
 
 	TRACE("len=%zu off=%zu\n", len, (size_t)offset);
@@ -210,24 +209,10 @@ static int write_dir(struct open_file *ofile, const char *buf, size_t len,
 
 	while (total < len) {
 		new_ddent = (struct disk_dentry *)(buf + total);
-
-		name_len = strnlen((char *)new_ddent->name, DDENT_NAME_MAX);
-		if (!name_len || name_len == DDENT_NAME_MAX)
-			return -EINVAL;
-
 		if (!new_ddent->size)
 			return -EINVAL;
 
-		dentry = __lookup(ofile->dentry, (char *)new_ddent->name,
-				name_len);
-		if (dentry) {
-			if (IS_ERR(dentry))
-				return -PTR_ERR(dentry);
-			__put_dentry(dentry);
-			return -EEXIST;
-		}
-
-		dentry = __add_dentry(ofile->dentry, (char *)new_ddent->name,
+		dentry = add_dentry(ofile->dentry, (char *)new_ddent->name,
 				new_ddent->mode);
 		if (IS_ERR(dentry))
 			return -PTR_ERR(dentry);
@@ -251,49 +236,12 @@ static int write_dir(struct open_file *ofile, const char *buf, size_t len,
 	return total;
 }
 
-static int read_dir(struct open_file *ofile, char *buf, size_t len,
-		off_t offset)
-{
-	struct dentry *dentry;
-	unsigned n;
-       	size_t total = 0;
-
-	if (len < sizeof(struct disk_dentry))
-		return -EINVAL;
-	if (len % sizeof(struct disk_dentry))
-		return -EINVAL;
-	if (offset % sizeof(struct disk_dentry))
-		return -EINVAL;
-
-	n = offset / sizeof(struct disk_dentry);
-
-	while (total < len) {
-		if (n >= ofile->dentry->size)
-			break;
-
-		dentry = __get_nth_dentry(ofile->dentry, n);
-		if (IS_ERR(dentry))
-			return -PTR_ERR(dentry);
-
-		memcpy(buf + total, dentry->ddent, sizeof(struct disk_dentry));
-		__put_dentry(dentry);
-
-		total += sizeof(struct disk_dentry);
-		n ++;
-	}
-
-	return total;
-}
-
 int read_file(struct open_file *ofile, char *buf, size_t bufsz, off_t offset)
 {
 	int len;
 
 	lock_file(ofile);
-	if (S_ISDIR(ofile->dentry->ddent->mode))
-		len = read_dir(ofile, buf, bufsz, offset);
-	else
-		len = rw_file(ofile, buf, bufsz, offset, 1);
+	len = rw_file(ofile, buf, bufsz, offset, 1);
 	unlock_file(ofile);
 
 	return len;

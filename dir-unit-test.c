@@ -95,6 +95,18 @@ char *d_path(const char *prefix, const struct dentry *dentry)
 	return path;
 }
 
+static struct dentry *locked_add_dentry(struct dentry *parent, const char *name,
+		mode_t mode)
+{
+	struct dentry *dentry;
+
+	lock(&parent->mutex);
+	dentry = add_dentry(parent, name, mode);
+	unlock(&parent->mutex);
+
+	return dentry;
+}
+
 static void test1(void)
 {
 	struct dentry *root;
@@ -109,14 +121,14 @@ static void test1(void)
 	printf("after getting root:\n");
 	dump_dentry(root, indent_start);
 
-	foo = add_dentry(root, "foo", S_IFREG | S_IRWXU);
+	foo = locked_add_dentry(root, "foo", S_IFREG | S_IRWXU);
 	if (IS_ERR(foo))
 		panic("add_dentry(foo): %s\n", strerror(PTR_ERR(foo)));
 
 	printf("after adding foo:\n");
 	dump_dentry(root, indent_start);
 
-	bar = add_dentry(root, "bar", S_IFREG | S_IRWXU);
+	bar = locked_add_dentry(root, "bar", S_IFREG | S_IRWXU);
 	if (IS_ERR(bar))
 		panic("del_dentry(bar): %s\n", strerror(PTR_ERR(bar)));
 
@@ -173,7 +185,7 @@ again:
 		if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, ".."))
 			continue;
 		if (de->d_type == DT_DIR) {
-			new = add_dentry(curr, de->d_name, S_IRWXU | S_IFDIR);
+			new = locked_add_dentry(curr, de->d_name, S_IRWXU | S_IFDIR);
 			if (IS_ERR(new)) {
 				panic("dir::add_dentry(%s/%s): %s\n",
 						curr->ddent->name,
@@ -188,7 +200,7 @@ again:
 			dtail = &d->next;
 			n ++;
 		} else if (de->d_type == DT_REG) {
-			new = add_dentry(curr, de->d_name, S_IRWXU | S_IFREG);
+			new = locked_add_dentry(curr, de->d_name, S_IRWXU | S_IFREG);
 			if (IS_ERR(new)) {
 				panic("reg::add_dentry(%s/%s): %s\n",
 						curr->ddent->name,
@@ -247,7 +259,7 @@ static void test3(void)
 
 	printf("Testing rename in the same directory.\n");
 
-	foo = add_dentry(root, "foo", S_IFREG | S_IRWXU);
+	foo = locked_add_dentry(root, "foo", S_IFREG | S_IRWXU);
 	if (IS_ERR(foo))
 		panic("add_dentry(foo): %s\n", strerror(PTR_ERR(foo)));
 
@@ -259,7 +271,7 @@ static void test3(void)
 	dump_dentry(root, indent_start);
 
 	printf("\nTesting rename in different directories:\n");
-	bar = add_dentry(root, "bar", S_IFDIR | S_IRWXU);
+	bar = locked_add_dentry(root, "bar", S_IFDIR | S_IRWXU);
 	if (IS_ERR(bar))
 		panic("add_dentry(bar): %s\n", strerror(PTR_ERR(bar)));
 

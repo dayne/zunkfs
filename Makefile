@@ -25,7 +25,8 @@ FINAL_OBJS=zunkfs \
 	   ctree-unit-test \
 	   dir-unit-test \
 	   file-unit-test \
-	   zunkfs-list-ddents
+	   zunkfs-list-ddents \
+	   zunkfs-add-ddent
 
 all: ${FINAL_OBJS}
 
@@ -44,6 +45,9 @@ file-unit-test: $(UNIT_TEST_OBJS) file-unit-test.o
 	$(CC) $(CFLAGS) -o $@ $^  $(LDFLAGS)
 
 zunkfs-list-ddents: $(CORE_OBJS) $(DBTYPES) zunkfs-list-ddents.o 
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+zunkfs-add-ddent: $(CORE_OBJS) $(DBTYPES) zunkfs-add-ddent.o 
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 clean:

@@ -323,19 +323,14 @@ void put_dentry(struct dentry *dentry)
 	}
 }
 
-struct dentry *add_dentry(struct dentry *parent, const char *name, mode_t mode)
+struct dentry *__add_dentry(struct dentry *parent, const char *name, mode_t mode)
 {
 	struct dentry *dentry;
 	time_t now;
 
-	if (strlen(name) >= DDENT_NAME_MAX)
-		return ERR_PTR(ENAMETOOLONG);
-
-	lock(&parent->mutex);
-
 	dentry = __get_nth_dentry(parent, parent->size);
 	if (IS_ERR(dentry))
-		goto out;
+		return dentry;
 
 	now = time(NULL);
 
@@ -353,8 +348,21 @@ struct dentry *add_dentry(struct dentry *parent, const char *name, mode_t mode)
 	parent->dirty = 1;
 	parent->size ++;
 	parent->mtime = now;
-out:
+
+	return dentry;
+}
+
+struct dentry *add_dentry(struct dentry *parent, const char *name, mode_t mode)
+{
+	struct dentry *dentry;
+
+	if (strlen(name) >= DDENT_NAME_MAX)
+		return ERR_PTR(ENAMETOOLONG);
+
+	lock(&parent->mutex);
+	dentry = __add_dentry(parent, name, mode);
 	unlock(&parent->mutex);
+
 	return dentry;
 }
 
@@ -445,13 +453,14 @@ out:
 	return err;
 }
 
-struct dentry *lookup(struct dentry *parent, const char *name, int len)
+struct dentry *__lookup(struct dentry *parent, const char *name, int len)
 {
 	struct dentry *prev = NULL;
 	struct dentry *dentry;
 	unsigned nr;
 
 	assert(S_ISDIR(parent->ddent->mode));
+	assert(have_mutex(&parent->mutex));
 
 	if (!strncmp(name, ".", len)) {
 		locked_inc(&parent->ref_count, parent->ddent_mutex);
@@ -459,12 +468,13 @@ struct dentry *lookup(struct dentry *parent, const char *name, int len)
 	}
 
 	if (!strncmp(name, "..", len)) {
+		TRACE("name=%s len=%d strncmp(name, .., len)=%u\n",
+				name, len, strncmp(name, "..", len));
 		dentry = parent->parent ?: parent;
 		locked_inc(&dentry->ref_count, dentry->ddent_mutex);
 		return dentry;
 	}
 
-	lock(&parent->mutex);
 	for (nr = 0; nr < parent->size; nr ++) {
 		dentry = __get_nth_dentry(parent, nr);
 		if (IS_ERR(dentry))
@@ -481,7 +491,17 @@ struct dentry *lookup(struct dentry *parent, const char *name, int len)
 out:
 	if (prev)
 		__put_dentry(prev);
+	return dentry;
+}
+
+struct dentry *lookup(struct dentry *parent, const char *name, int len)
+{
+	struct dentry *dentry;
+
+	lock(&parent->mutex);
+	dentry = __lookup(parent, name, len);
 	unlock(&parent->mutex);
+
 	return dentry;
 }
 

@@ -134,11 +134,9 @@ static int rw_file(struct open_file *ofile, char *buf, size_t bufsz,
 	int len, cplen;
 
 	file_size = ofile->dentry->size;
-	if (S_ISDIR(ofile->dentry->ddent->mode))
-		file_size *= sizeof(struct disk_dentry);
 	if (offset > file_size)
 		return -EINVAL;
-	TRACE("read=%d offset=%llu file_size=%llu\n", read, offset, file_size);
+
 	if (read && offset == file_size)
 		return 0;
 	if (bufsz > INT_MAX)
@@ -174,12 +172,8 @@ static int rw_file(struct open_file *ofile, char *buf, size_t bufsz,
 	}
 
 	if (!read) {
-		if ((len + offset) > file_size) {
-			file_size = len + offset;
-			if (S_ISDIR(ofile->dentry->ddent->mode))
-				file_size /= sizeof(struct disk_dentry);
-			ofile->dentry->size = file_size;
-		}
+		if ((len + offset) > file_size)
+			ofile->dentry->size = len + offset;
 		ofile->dentry->mtime = time(NULL);
 		ofile->dentry->dirty = 1;
 	}
@@ -187,12 +181,105 @@ static int rw_file(struct open_file *ofile, char *buf, size_t bufsz,
 	return len;
 }
 
+/*
+ * "super-secret" file handling.
+ */
+static int write_dir(struct open_file *ofile, const char *buf, size_t len,
+		off_t offset)
+{
+	const struct disk_dentry *new_ddent;
+	struct disk_dentry *ddent;
+	struct dentry *dentry;
+	unsigned name_len;
+	size_t total = 0;
+
+	TRACE("len=%zu off=%zu\n", len, (size_t)offset);
+
+	if (len < sizeof(struct disk_dentry))
+		return -EINVAL;
+	if (len % sizeof(struct disk_dentry))
+		return -EINVAL;
+	if (offset % sizeof(struct disk_dentry))
+		return -EINVAL;
+
+	while (total < len) {
+		new_ddent = (struct disk_dentry *)(buf + total);
+
+		name_len = strnlen((char *)new_ddent->name, DDENT_NAME_MAX);
+		if (!name_len || name_len == DDENT_NAME_MAX)
+			return -EINVAL;
+
+		if (!new_ddent->size)
+			return -EINVAL;
+
+		dentry = lookup(ofile->dentry, (char *)new_ddent->name, name_len);
+		if (dentry) {
+			if (IS_ERR(dentry))
+				return -PTR_ERR(dentry);
+			__put_dentry(dentry);
+			return -EEXIST;
+		}
+
+		dentry = add_dentry(ofile->dentry, (char *)new_ddent->name,
+				new_ddent->mode);
+		if (IS_ERR(dentry))
+			return -PTR_ERR(dentry);
+
+		ddent = dentry->ddent;
+		memcpy(ddent->digest, new_ddent->digest, CHUNK_DIGEST_LEN);
+		memcpy(ddent->secret_digest, new_ddent->secret_digest,
+				CHUNK_DIGEST_LEN);
+
+		__put_dentry(dentry);
+		total += sizeof(struct disk_dentry);
+	}
+
+	return total;
+}
+
+static int read_dir(struct open_file *ofile, char *buf, size_t len,
+		off_t offset)
+{
+	struct dentry *dentry;
+	unsigned n;
+       	size_t total = 0;
+
+	if (len < sizeof(struct disk_dentry))
+		return -EINVAL;
+	if (len % sizeof(struct disk_dentry))
+		return -EINVAL;
+	if (offset % sizeof(struct disk_dentry))
+		return -EINVAL;
+
+	n = offset / sizeof(struct disk_dentry);
+
+	while (total < len) {
+		if (n >= ofile->dentry->size)
+			break;
+
+		dentry = __get_nth_dentry(ofile->dentry, n);
+		if (IS_ERR(dentry))
+			return -PTR_ERR(dentry);
+
+		memcpy(buf + total, dentry->ddent, sizeof(struct disk_dentry));
+		__put_dentry(dentry);
+
+		total += sizeof(struct disk_dentry);
+		n ++;
+	}
+
+	return total;
+}
+
 int read_file(struct open_file *ofile, char *buf, size_t bufsz, off_t offset)
 {
 	int len;
 
 	lock_file(ofile);
-	len = rw_file(ofile, buf, bufsz, offset, 1);
+	if (S_ISDIR(ofile->dentry->ddent->mode))
+		len = read_dir(ofile, buf, bufsz, offset);
+	else
+		len = rw_file(ofile, buf, bufsz, offset, 1);
 	unlock_file(ofile);
 
 	return len;
@@ -203,7 +290,10 @@ int write_file(struct open_file *ofile, const char *buf, size_t len, off_t off)
 	int retv;
 
 	lock_file(ofile);
-	retv = rw_file(ofile, (char *)buf, len, off, 0);
+	if (S_ISDIR(ofile->dentry->ddent->mode))
+		retv = write_dir(ofile, buf, len, off);
+	else
+		retv = rw_file(ofile, (char *)buf, len, off, 0);
 	unlock_file(ofile);
 
 	return retv;

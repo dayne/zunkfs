@@ -95,7 +95,7 @@ int main(int argc, char **argv)
 		}
 		if (!err)
 			break;
-		printf("%s %s 0%o %llu %u %u %s\n",
+		printf("%s %s 0%0o %llu %u %u %s\n", 
 				digest_string(dentry.digest),
 				digest_string(dentry.secret_digest),
 				dentry.mode,

@@ -166,7 +166,7 @@ struct chunk_node *get_dentry_chunk(struct dentry *dentry, unsigned chunk_nr)
 	return get_nth_chunk(&dentry->chunk_tree, chunk_nr);
 }
 
-static struct dentry *__get_nth_dentry(struct dentry *parent, unsigned nr)
+struct dentry *__get_nth_dentry(struct dentry *parent, unsigned nr)
 {
 	struct dentry *dentry;
 	struct disk_dentry *ddent;
@@ -288,7 +288,7 @@ static void free_dentry(struct dentry *dentry)
 /*
  * Call this only if you hold the parent's mutex _and_ ref count.
  */
-static void __put_dentry(struct dentry *dentry)
+void __put_dentry(struct dentry *dentry)
 {
 	struct dentry *parent;
 
@@ -445,7 +445,7 @@ out:
 	return err;
 }
 
-static struct dentry *lookup(struct dentry *parent, const char *name, int len)
+struct dentry *lookup(struct dentry *parent, const char *name, int len)
 {
 	struct dentry *prev = NULL;
 	struct dentry *dentry;

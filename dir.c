@@ -323,7 +323,7 @@ void put_dentry(struct dentry *dentry)
 	}
 }
 
-static struct dentry *__lookup(struct dentry *parent, const char *name, int len)
+static struct dentry *lookup(struct dentry *parent, const char *name, int len)
 {
 	struct dentry *prev = NULL;
 	struct dentry *dentry;
@@ -331,6 +331,9 @@ static struct dentry *__lookup(struct dentry *parent, const char *name, int len)
 
 	assert(S_ISDIR(parent->ddent->mode));
 	assert(have_mutex(&parent->mutex));
+
+	if (len >= DDENT_NAME_MAX)
+		return ERR_PTR(ENAMETOOLONG);
 
 	if (!strncmp(name, ".", len)) {
 		locked_inc(&parent->ref_count, parent->ddent_mutex);
@@ -362,17 +365,6 @@ out:
 	return dentry;
 }
 
-struct dentry *lookup(struct dentry *parent, const char *name, int len)
-{
-	struct dentry *dentry;
-
-	lock(&parent->mutex);
-	dentry = __lookup(parent, name, len);
-	unlock(&parent->mutex);
-
-	return dentry;
-}
-
 struct dentry *add_dentry(struct dentry *parent, const char *name, mode_t mode)
 {
 	struct dentry *dentry;
@@ -388,7 +380,7 @@ struct dentry *add_dentry(struct dentry *parent, const char *name, mode_t mode)
 	if (name_len == DDENT_NAME_MAX)
 		return ERR_PTR(ENAMETOOLONG);
 
-	dentry = __lookup(parent, name, name_len);
+	dentry = lookup(parent, name, name_len);
 	if (dentry) {
 		if (IS_ERR(dentry))
 			return dentry;
@@ -524,8 +516,10 @@ struct dentry *find_dentry_parent(const char *path, struct dentry **pparent,
 	for (;;) {
 		parent = dentry;
 		next = strchr(path, '/');
-		len = next ? next - path : strlen(path);
+		len = next ? next - path : strnlen(path, DDENT_NAME_MAX);
+		lock(&parent->mutex);
 		dentry = lookup(parent, path, len);
+		unlock(&parent->mutex);
 		if (IS_ERR(dentry)) {
 			put_dentry(parent);
 			return dentry;
@@ -647,7 +641,7 @@ static int __rename_dentry(struct dentry *dentry, const char *new_name,
 	struct dentry *tmp;
 	int err;
 
-	if (strlen(new_name) >= DDENT_NAME_MAX)
+	if (strnlen(new_name, DDENT_NAME_MAX) == DDENT_NAME_MAX)
 		return -ENAMETOOLONG;
 	if (!dentry->parent)
 		return -EINVAL;

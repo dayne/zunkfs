@@ -79,8 +79,6 @@ struct dentry *add_dentry(struct dentry *parent, const char *name, mode_t mode);
 int del_dentry(struct dentry *dentry);
 struct chunk_node *get_dentry_chunk(struct dentry *dentry, unsigned chunk_nr);
 
-struct dentry *lookup(struct dentry *parent, const char *name, int len);
-
 struct dentry *find_dentry_parent(const char *path, struct dentry **pparent,
 		const char **name);
 

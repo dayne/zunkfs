@@ -20,7 +20,8 @@
 static int write_chunk_sqlite(const unsigned char *chunk,
 		const unsigned char *digest, void *db_info)
 {
-	static const char sql[] = "INSERT INTO chunk(hash, data) VALUES(?,?)";
+	static const char sql[] =
+		"INSERT OR IGNORE INTO chunk(hash, data) VALUES(?,?)";
 	sqlite3_stmt *stmt;
 	int err;
 

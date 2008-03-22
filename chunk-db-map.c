@@ -14,6 +14,7 @@
 #include "zunkfs.h"
 #include "chunk-db.h"
 #include "utils.h"
+#include "mutex.h"
 
 /*
  * Database schema is:
@@ -34,6 +35,7 @@ struct chunk_map {
 };
 
 struct db_info {
+	struct mutex mutex;
 	const char *db_name;
 	union {
 		sqlite3 *sqlite3_db;
@@ -41,6 +43,9 @@ struct db_info {
 	int (*query_map)(struct db_info *, const char *query,
 			struct chunk_map *map);
 };
+
+#define lock_db(db) lock(&(db)->mutex)
+#define unlock_db(db) unlock(&(db)->mutex)
 
 static int read_chunk_from_file(const char *path, unsigned nr, 
 		unsigned char *chunk)
@@ -102,8 +107,10 @@ static int query_map_sqlite3(struct db_info *db, const char *query,
 
 	TRACE("db=%s query=%s", db->db_name, query);
 
+	lock_db(db);
 	err = sqlite3_exec(db->sqlite3_db, query, sqlite3_query_callback, map,
 			&errmsg);
+	unlock_db(db);
 	if (err != SQLITE_OK) {
 		ERROR("%s: Query '%s' failed: %s\n", db->db_name, query,
 				errmsg);

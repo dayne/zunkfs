@@ -21,7 +21,7 @@ struct disk_dentry {
 	uint32_t ctime;                          //  4 56
 	uint32_t mtime;                          //  4 60
 	uint8_t name[DDENT_NAME_MAX];            // .. 256
-};
+} __attribute__((packed));
 
 COMPILER_ASSERT(sizeof(struct disk_dentry) == 256, sizeof_disk_dentry_is_256);
 

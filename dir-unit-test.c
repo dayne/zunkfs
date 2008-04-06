@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <dirent.h>
 #include <errno.h>
+#include <inttypes.h>
 #include <limits.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -293,7 +294,7 @@ static void test3(void)
 	printf("After rename_dentry(/bar/foo, /foo):\n");
 	dump_dentry(root, indent_start);
 
-	printf("Before del(foo) root->size=%llu bar->size=%llu\n",
+	printf("Before del(foo) root->size=%"PRIu64" bar->size=%"PRIu64"\n",
 			root->size, bar->size);
 
 	err = del_dentry(foo);
@@ -301,7 +302,7 @@ static void test3(void)
 		panic("del_dentry(/bar/foo): %s\n", strerror(-err));
 	put_dentry(foo);
 
-	printf("After del(foo) root->size=%llu bar->size=%llu\n",
+	printf("After del(foo) root->size=%"PRIu64" bar->size=%"PRIu64"\n",
 			root->size, bar->size);
 
 	err = del_dentry(bar);

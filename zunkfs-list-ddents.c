@@ -1,6 +1,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <inttypes.h>
 #include <libgen.h>
 #include <stdio.h>
 #include <string.h>
@@ -81,8 +82,8 @@ int main(int argc, char **argv)
 
 	fd = open(SUPER_SECRET_FILE, O_RDONLY);
 	if (fd < 0) {
-		fprintf(stderr, "Can't open %s/%s: %s\n", cwd, SUPER_SECRET_FILE, 
-				strerror(errno));
+		fprintf(stderr, "Can't open %s/%s: %s\n", cwd,
+				SUPER_SECRET_FILE, strerror(errno));
 		exit(-2);
 	}
 
@@ -95,7 +96,7 @@ int main(int argc, char **argv)
 		}
 		if (!err)
 			break;
-		printf("%s %s 0%0o %llu %u %u %s\n", 
+		printf("%s %s 0%0o %"PRIu64" %u %u %s\n", 
 				digest_string(dentry.digest),
 				digest_string(dentry.secret_digest),
 				dentry.mode,

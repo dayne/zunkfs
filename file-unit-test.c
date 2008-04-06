@@ -4,6 +4,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <inttypes.h>
 #include <limits.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -121,7 +122,7 @@ read_again3:
 		offset += m;
 	}
 
-	printf("size=%llu nr_leafs=%u height=%u\n",
+	printf("size=%"PRIu64" nr_leafs=%u height=%u\n",
 			ofile->dentry->size,
 			ofile->dentry->chunk_tree.nr_leafs,
 			ofile->dentry->chunk_tree.height);

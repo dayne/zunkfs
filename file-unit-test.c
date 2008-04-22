@@ -13,6 +13,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <libgen.h>
 
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -23,26 +24,43 @@
 #include "utils.h"
 #include "file.h"
 #include "dir.h"
+#include "chunk-db.h"
 
 static const char spaces[] = "                                                                                                                                                               ";
 #define indent_start (spaces + sizeof(spaces) - 1)
 
 void test_import(char *path)
 {
-	loff_t offset;
+	off_t offset;
 	int fd, err;
 	struct open_file *ofile;
 	struct timeval start, end, delta;
+	struct stat stbuf;
 
 	gettimeofday(&start, NULL);
 
 	fd = open(path, O_RDONLY);
-	if (fd < 0)
-		panic("open %s: %s\n", path, strerror(errno));
+	if (fd < 0) {
+		if (errno == EPERM)
+			return;
+		if (errno == EACCES)
+			return;
+		panic("open %s: (%d) %s\n", path, errno, strerror(errno));
+	}
+
+	if (fstat(fd, &stbuf)) {
+		close(fd);
+		return;
+	}
+
+	if (!S_ISREG(stbuf.st_mode)) {
+		close(fd);
+		return;
+	}
 
 	fprintf(stderr, "importing %s\n", path);
 
-	ofile = create_file(basename(path), 0700);
+	ofile = create_file(basename(path), 0700 | S_IFREG);
 	if (IS_ERR(ofile))
 		panic("create_file: %s\n", strerror(PTR_ERR(ofile)));
 
@@ -87,7 +105,7 @@ write_again:
 	timersub(&end, &start, &delta);
 	start = end;
 
-	printf("time to import: %lu.%06lu\n", delta.tv_sec, delta.tv_usec);
+	printf("time to import: %lu.%06u\n", delta.tv_sec, delta.tv_usec);
 
 	fprintf(stderr, "verifying...\n");
 	err = lseek(fd, 0, SEEK_SET);
@@ -136,7 +154,7 @@ read_again3:
 	gettimeofday(&end, NULL);
 	timersub(&end, &start, &delta);
 
-	printf("time to verify: %lu.%06lu\n", delta.tv_sec, delta.tv_usec);
+	printf("time to verify: %lu.%06u\n", delta.tv_sec, delta.tv_usec);
 }
 
 int main(int argc, char **argv)
@@ -146,6 +164,11 @@ int main(int argc, char **argv)
 	int i, err;
 
 	zunkfs_log_fd = stdout;
+	zunkfs_log_level = 'T';
+
+	err = add_chunkdb(CHUNKDB_RW, "mem:");
+	if (err)
+		panic("add_chunkdb: %s\n", strerror(-err));
 
 	err = init_disk_dentry(&root_ddent);
 	if (err < 0)

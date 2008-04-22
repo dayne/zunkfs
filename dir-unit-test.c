@@ -18,6 +18,7 @@
 #include "zunkfs.h"
 #include "zunkfs-tests.h"
 #include "dir.h"
+#include "chunk-db.h"
 
 static const char spaces[] = "                                                                                                                                                               ";
 #define indent_start (spaces + sizeof(spaces) - 1)
@@ -36,6 +37,11 @@ int main(int argc, char **argv)
 			(unsigned long)DIRENTS_PER_CHUNK);
 
 	zunkfs_log_fd = stdout;
+	zunkfs_log_level = 'T';
+
+	err = add_chunkdb(CHUNKDB_RW, "mem:");
+	if (err)
+		panic("add_chunkdb: %s\n", strerror(-err));
 
 	err = init_disk_dentry(&root_ddent);
 	if (err < 0)

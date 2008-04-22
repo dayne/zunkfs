@@ -11,6 +11,7 @@
 #include "zunkfs.h"
 #include "zunkfs-tests.h"
 #include "dir.h"
+#include "chunk-db.h"
 
 #define NR_NODES	50 * DIGESTS_PER_CHUNK
 
@@ -66,6 +67,11 @@ int main(int argc, char **argv)
 	int i, err;
 
 	zunkfs_log_fd = stdout;
+	zunkfs_log_level = 'T';
+
+	err = add_chunkdb(CHUNKDB_RW, "mem:");
+	if (err)
+		panic("add_chunkdb: %s\n", strerror(-err));
 
 	err = random_chunk_digest(rand_digest);
 	if (err < 0)

@@ -9,6 +9,9 @@ Got FUSE?
   OSX + MacPorts
     port install libfuse
 
+Make some binaries:
+  make  # hopefully that just works and you don't have any errors
+
 Getting started:
   wget http://drze.net/junk/testfs
   mkdir .chunks

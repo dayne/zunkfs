@@ -6,6 +6,8 @@ Got FUSE?
     # add your user to the fuse group - logout/login
 	Gentoo
 		emerge -va sys-fs/fuse
+  OSX + MacPorts
+    port install libfuse
 
 Getting started:
   wget http://drze.net/junk/testfs

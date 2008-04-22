@@ -1,0 +1,30 @@
+zunkfs is a "content-addressable-filesystem." Ie, everything in it is kept via SHA1 hashes.  And it's got some light encryption in it too.
+
+Files and directories are described by a "disk directory entry" (disk_dentry or ddent for short.) A ddent has the following stuff in it:
+
+- name of the file/directory (upto 196 chars)
+- 20 byte, SHA1 hash desribing the "root chunk" [1] of the file.
+- 20 byte, SHA1 hash desribing the "secret chunk" [2] of the file.
+- file/directory size (bytes or # of entries)
+- "mode" (rwx, file or directory)
+- create time (in seconds)
+- modify time (in seconds)
+
+The fs itself is described by the ddent that defines the / directory.
+All entries and divided up into 64k-sized chunks, and are stored in
+a tree structure. The tree is dynamically expanded to fit all chunks
+needed for the file. Internal nodes of the tree are also chunks, which contain
+lists of 20-byte hashes of other chunks.
+
+       [ root chunk ]
+        /    |      \
+ [ leaf 1 ] [leaf 2] [leaf 3]
+
+In the case of files, leaf chunks contain file data. For directories, leaf chunks contain arrays of ddents.
+
+[1] The "root chunk" of the file contains the root chunk of a chunk tree which contains the files data.
+
+[2] The "secret chunk" is used to do simple XOR-based mangling of all chunks.
+All chunks in a files chunk tree are mangled with this XOR. The hash that is stored is that of the final XORed data. When a file or directory is created, a new random chunk is also created to be the secret chunk for that ddent.
+
+At the moment, chunks are stored a ".chunks" directory in the current working directory. I've verified that I can copy some files and create directories within a zunkfs mount. Created files will match the expected SHA1 hash of the original. And they are preserved accross remounts.

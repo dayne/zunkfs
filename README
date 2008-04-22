@@ -1,3 +1,10 @@
+Got FUSE?
+  gotta have FUSE to make this work, it will be called soemthing like:
+    libfuse, libfuse-dev or libfuse-devel
+  Centos
+    yum install fuse dkms-fuse fuse-devel
+    # add your user to the fuse group - logout/login
+
 Getting started:
   wget http://drze.net/junk/testfs
   mkdir .chunks

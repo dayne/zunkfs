@@ -28,3 +28,19 @@ In the case of files, leaf chunks contain file data. For directories, leaf chunk
 All chunks in a files chunk tree are mangled with this XOR. The hash that is stored is that of the final XORed data. When a file or directory is created, a new random chunk is also created to be the secret chunk for that ddent.
 
 At the moment, chunks are stored a ".chunks" directory in the current working directory. I've verified that I can copy some files and create directories within a zunkfs mount. Created files will match the expected SHA1 hash of the original. And they are preserved accross remounts.
+
+--- random thoughts captured from drze ---
+
+try running: zunkfs-list-ddents in a zunkfs directory
+
+zunkfs-add-ddents lets you add stuff from somebody else's zunkfs
+If you were to create an empty zunkfs then do 
+  $ zunkfs-add-ddent file <digest> <secret digest> <size> <name>
+zunkfs-list-ddents lists the <digest> <secret digest> <mode> <size> <ctime> <mtime> <name>
+If we were all connected to some shared chunk-db btu we've got our own zunkfs roots and I want a file that you have got you just give me three things:
+  1) digest
+  2) secret digest
+  3) size
+and from that, I can get at that file (same thing applies to directories)
+
+zunkfs-list-ddents --car

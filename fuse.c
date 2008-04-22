@@ -20,6 +20,7 @@
 #include <stdarg.h>
 #include <pthread.h>
 #include <sys/mman.h>
+#include <libgen.h>
 
 #include "zunkfs.h"
 #include "chunk-db.h"
@@ -357,7 +358,7 @@ static void set_root_file(const char *fs_descr)
 	}
 
 	root_ddent = mmap(NULL, 4096, PROT_READ|PROT_WRITE,
-			MAP_SHARED|MAP_POPULATE, fd, 0);
+			MAP_SHARED, fd, 0);
 	if (root_ddent == MAP_FAILED) {
 		ERROR("mmap(%s): %s\n", fs_descr, strerror(errno));
 		exit(-2);

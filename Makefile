@@ -1,10 +1,20 @@
-FUSE_CFLAGS=$(shell pkg-config fuse --cflags) -D_FILE_OFFSET_BITS=64
-FUSE_LIBS=$(shell pkg-config fuse --libs)
-CFLAGS=-g -Wall $(FUSE_CFLAGS)
+FUSE_CFLAGS=$(shell pkg-config fuse --cflags)
+FUSE_LIBS=$(shell pkg-config fuse --libs) 
 LDFLAGS=-lssl -lsqlite3 $(FUSE_LIBS)
+CFLAGS=-g -Wall $(FUSE_CFLAGS) -DZUNKFS_OS=$(OS)
+OS=$(shell /usr/bin/uname)
 
 ifdef CHUNK_SIZE
 CFLAGS+=-DCHUNK_SIZE=$(CHUNK_SIZE)
+endif
+
+ifeq ("$(OS)","Darwin")
+LDFLAGS+=-lcrypto
+LDFLAGS+=-framework CoreFoundation
+endif
+
+ifeq ("$(OS)","Linux")
+FUSE_CFLAGS+=-D_FILE_OFFSET_BITS=64
 endif
 
 CORE_OBJS=chunk-tree.o \
@@ -17,9 +27,10 @@ CORE_OBJS=chunk-tree.o \
 DBTYPES=chunk-db-local.o \
 	chunk-db-cmd.o \
 	chunk-db-map.o \
-	chunk-db-sqlite.o
+	chunk-db-sqlite.o \
+	chunk-db-mem.o
 
-UNIT_TEST_OBJS=$(CORE_OBJS) unit-test-utils.o
+UNIT_TEST_OBJS=$(CORE_OBJS) unit-test-utils.o chunk-db-mem.o
 
 FINAL_OBJS=zunkfs \
 	   ctree-unit-test \

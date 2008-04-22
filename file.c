@@ -54,7 +54,8 @@ struct open_file *create_file(const char *path, mode_t mode)
 	struct dentry *dentry;
 	struct open_file *ofile;
 
-	assert(S_ISREG(mode) && !S_ISDIR(mode));
+	assert(S_ISREG(mode));
+	assert(!S_ISDIR(mode));
 
 	dentry = create_dentry(path, mode | S_IFREG);
 	if (IS_ERR(dentry))

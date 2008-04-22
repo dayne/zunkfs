@@ -53,11 +53,21 @@ void *const __errptr;
 static void __attribute__((constructor)) util_init(void)
 {
 	void *errptr = mmap(NULL, (MAX_ERRNO + 4095) & ~4095, PROT_NONE,
-			MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+			MAP_PRIVATE|MAP_ANON, -1, 0);
 	if (errptr == MAP_FAILED) {
 		fprintf(stderr, "errptr: %s\n", strerror(errno));
 		exit(-1);
 	}
 	memcpy((void *)&__errptr, &errptr, sizeof(void *));
 }
+
+#if ZUNKFS_OS == Darwin
+size_t strnlen(const char *str, size_t max)
+{
+	size_t len;
+	for (len = 0; len < max && str[len]; len ++)
+		;
+	return len;
+}
+#endif
 

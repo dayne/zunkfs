@@ -12,7 +12,7 @@ struct mutex {
 	pthread_t owner;
 };
 
-#ifndef NDEBUG
+#if !defined(NDEBUG) && defined(PTHREAD_ERRORCHECK_MUTEX_INITIALIZER_NP)
 #define INIT_MUTEX { PTHREAD_ERRORCHECK_MUTEX_INITIALIZER_NP, (pthread_t)-1 }
 #else
 #define INIT_MUTEX { PTHREAD_MUTEX_INITIALIZER, (pthread_t)-1 }

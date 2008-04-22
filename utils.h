@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+extern size_t strnlen(const char *s, size_t maxlen);
+
 /*
  * Logging
  */

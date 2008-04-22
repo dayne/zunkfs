@@ -1,0 +1,8 @@
+Getting started:
+  wget http://drze.net/junk/testfs
+  mkdir .chunks
+  mkdir mnt
+  ./zunkfs --chunk-db=rw,dir:$PWD/.chunks \
+           --chunk-db=ro,cmd:$PWD/fetch.sh ./testfs ./mnt
+  cd mnt
+  ls -la

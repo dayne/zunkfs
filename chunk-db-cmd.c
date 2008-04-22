@@ -72,19 +72,12 @@ static int fetch_chunk(unsigned char *chunk, const unsigned char *digest,
 
 		close(fd[0]);
 		
-		err = waitpid(pid, &status, 0);
-		if (err < 0) {
-			ERROR("waidpid: %s\n", strerror(errno));
-			return -EIO;
-		}
-		if (!WIFEXITED(status)) {
-			ERROR("Fetcher died unexpectedly.\n");
-			return -EIO;
-		}
-		if (WEXITSTATUS(status)) {
-			ERROR("Fetcher returned %d\n", WEXITSTATUS(status));
-			return -EIO;
-		}
+		/*
+		 * Don't worry about return values from waitpid(),
+		 * as the chunk is already fetched.
+		 */
+		waitpid(pid, &status, 0);
+
 		if (!verify_chunk(chunk, digest)) {
 			ERROR("Chunk failed verification\n");
 			return -EIO;

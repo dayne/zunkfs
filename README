@@ -4,6 +4,8 @@ Got FUSE?
   Centos
     yum install fuse dkms-fuse fuse-devel
     # add your user to the fuse group - logout/login
+	Gentoo
+		emerge -va sys-fs/fuse
 
 Getting started:
   wget http://drze.net/junk/testfs

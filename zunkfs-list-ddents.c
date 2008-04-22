@@ -74,7 +74,10 @@ int main(int argc, char **argv)
 				zunkfs_log_fd = stdout;
 			else
 				zunkfs_log_fd = fopen(arg, "w");
-		} else {
+		} else if (!strncmp(arg, "--car", 5)) {
+        fprintf(stderr, "small ding on the front bumper... hardly visible.\n");
+        exit(-1);
+    } else {
 			fprintf(stderr, "Invalid option: %s\n", arg);
 			exit(-1);
 		}

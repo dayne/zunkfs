@@ -20,3 +20,6 @@ Getting started:
            --chunk-db=ro,cmd:$PWD/fetch.sh ./testfs ./mnt
   cd mnt
   ls -la
+
+Well that worked, now what?
+  

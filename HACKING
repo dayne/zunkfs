@@ -53,7 +53,8 @@ Defines 3 messages:
   store_chunk <chunk value, base64 encoded (*) >
   request_done <chunk hash in hex format>
 (*) base64 encoding isn't quite RFC-compliant (doesn't insert \r\n for 76th  
-character. Why?  It makes other things easier.
+character. Why?  It makes other things easier.  Let us not callit base64, and
+instead call it z64 encoding so people aren't sad by non-compliance.
 
 request_done is sent as a reply to the find_chunk or store_chunk. 
 store_chunk is also sent as a reply to find_chunk.

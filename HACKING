@@ -44,3 +44,19 @@ If we were all connected to some shared chunk-db btu we've got our own zunkfs ro
 and from that, I can get at that file (same thing applies to directories)
 
 zunkfs-list-ddents --car
+
+----
+A protocol for zunkfs (dirt simple) - run down in IRC by drze:
+
+Defines 3 messages:
+  find_chunk <chunk hash in hex format>
+  store_chunk <chunk value, base64 encoded (*) >
+  request_done <chunk hash in hex format>
+(*) base64 encoding isn't quite RFC-compliant (doesn't insert \r\n for 76th  
+character. Why?  It makes other things easier.
+
+request_done is sent as a reply to the find_chunk or store_chunk. 
+store_chunk is also sent as a reply to find_chunk.
+
+
+

@@ -5,3 +5,5 @@ file-unit-test
 zunkfs
 zunkfs-add-ddent
 zunkfs-list-ddents
+.chunks
+testfs

@@ -112,6 +112,8 @@ again:
 
 	if (chunk_nr == ctree->nr_leafs) {
 		max_path = alloca(sizeof(unsigned *) * ctree->height);
+		assert(max_path != NULL);
+
 		nr = ctree->nr_leafs - 1;
 		for (i = 0; i < ctree->height; i ++) {
 			max_path[i] = nr % DIGESTS_PER_CHUNK;

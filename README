@@ -22,4 +22,6 @@ Getting started:
   ls -la
 
 Well that worked, now what?
-  
+  Start hacking together your own chunk database!!! 
+  (You can use the ZunkDB protocol as a base.)
+

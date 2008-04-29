@@ -48,16 +48,31 @@ zunkfs-list-ddents --car
 ----
 A protocol for zunkfs (dirt simple) - run down in IRC by drze:
 
-Defines 3 messages:
-  find_chunk <chunk hash in hex format>
-  store_chunk <chunk value, base64 encoded (*) >
-  request_done <chunk hash in hex format>
-(*) base64 encoding isn't quite RFC-compliant (doesn't insert \r\n for 76th  
-character. Why?  It makes other things easier.  Let us not callit base64, and
+Defines 4 messages, used by both ends:
+
+- find_chunk <digest>
+	Search for a chunk, digest specified as a hex string.
+	Valid replies include store_chunk and store_node.
+
+- store_chunk <chunk>
+	Store a chunk, passed in base64-encoded (*).
+	Valid replies are none or store_node.
+
+- store_node <ip:port>
+	As a reply, means that request should be sent to 
+	this ip:port too. As a request, the ZunkDB should
+	store ip:port.
+
+- request_done <digest>
+	Reply ending find_chunk and store_chunk. Digest should match
+	the chunk in question.
+
+(*) base64 encoding isn't quite MIME-compliant, as it doesn't insert \r\n for 76th  
+character. Why? It makes other things easier.  Let us not callit base64, and
 instead call it z64 encoding so people aren't sad by non-compliance.
 
-request_done is sent as a reply to the find_chunk or store_chunk. 
-store_chunk is also sent as a reply to find_chunk.
-
-
+The point of "store_node" is to allow ZunkDB to work more like a P2P system. 
+ZunkDBs can be distributed and know of other ZunkDB "nodes". When a ZunkDB receives
+a request, and deems that another node should process it, it'll tell the client
+to send the request to the given address.
 

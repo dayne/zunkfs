@@ -23,35 +23,35 @@ static unsigned char base64_map(const char **strp)
 	return 0;
 }
 
+/*
+ * Returns actual size of decoded buffer.
+ */
 size_t base64_decode(const char *str, unsigned char *buf, size_t size)
 {
 	unsigned int n;
-	size_t i, j;
+	size_t i, j, actual = 0;
 
-	for (i = 0; i < size && *str && *str != '='; ) {
+	for (i = 0; *str && *str != '='; ) {
 		n =  base64_map(&str) << 18;
 		n += base64_map(&str) << 12;
 		n += base64_map(&str) << 6;
 		n += base64_map(&str);
 
-		buf[i++] = (n >> 16) & 255;
-		if (i == size)
-			return size;
+		if (i < size)
+			buf[i++] = (n >> 16) & 255;
+		if (i < size)
+			buf[i++] = (n >> 8) & 255;
+		if (i < size)
+			buf[i++] = n & 255;
 
-		buf[i++] = (n >> 8) & 255;
-		if (i == size)
-			return size;
-
-		buf[i++] = n & 255;
-		if (i == size)
-			return size;
+		actual += 3;
 	}
 
 	/* account for padding */
 	for (j = 0; j < 3 && str[j] == '='; j ++)
-		i --;
+		actual --;
 
-	return i;
+	return actual;
 }
 
 int base64_encode_evbuf(struct evbuffer *evbuf, const unsigned char *s,

@@ -4,8 +4,8 @@ Got FUSE?
   Centos
     yum install fuse dkms-fuse fuse-devel
     # add your user to the fuse group - logout/login
-	Gentoo
-		emerge -va sys-fs/fuse
+  Gentoo
+    emerge -va sys-fs/fuse
   OSX + MacPorts
     port install libfuse
 

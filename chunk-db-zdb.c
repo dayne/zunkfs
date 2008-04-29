@@ -238,7 +238,6 @@ again:
 static inline void write_request(struct node *node, struct request *request)
 {
 	bufferevent_base_set(request->base, node->bev);
-
 	bufferevent_write(node->bev, EVBUFFER_DATA(request->evbuf),
 			EVBUFFER_LENGTH(request->evbuf));
 }
@@ -340,6 +339,8 @@ static int send_request(struct evbuffer *evbuf, struct zdb_info *db_info,
 	while (request.node_list)
 		__cache_node(request.node_list);
 	unlock(&cache_mutex);
+
+	free(request.addr_list);
 
 	evbuffer_free(request.evbuf);
 	event_base_free(request.base);

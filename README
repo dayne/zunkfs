@@ -1,27 +1,118 @@
-Got FUSE?
-  gotta have FUSE to make this work, it will be called soemthing like:
-    libfuse, libfuse-dev or libfuse-devel
-  Centos
-    yum install fuse dkms-fuse fuse-devel
-    # add your user to the fuse group - logout/login
-  Gentoo
-    emerge -va sys-fs/fuse
-  OSX + MacPorts
-    port install libfuse
 
-Make some binaries:
+I. Prerequisites:
+=================
+- FUSE
+- libevent (http://monkey.org/~provos/libevent/)
+- sqlite3
+
+Centos:
+	yum install fuse dkms-fuse fuse-devel
+	yum install libevent-devel
+	yum install sqlite-devel
+	# add your user to the fuse group - logout/login
+
+Gentoo:
+	emerge -va sys-fs/fuse
+
+Ubuntu/Debian:
+	apt-get install libfuse-dev
+	apt-get install libsqlite3-dev
+	apt-get install libevent-dev
+
+OSX + MacPorts:
+	port install libfuse
+	port install libevent
+	port install sqlite3
+
+
+II. Buildling
+==============
+
   make  # hopefully that just works and you don't have any errors
 
-Getting started:
-  wget http://drze.net/junk/testfs
-  mkdir .chunks
-  mkdir mnt
-  ./zunkfs --chunk-db=rw,dir:$PWD/.chunks \
-           --chunk-db=ro,cmd:$PWD/fetch.sh ./testfs ./mnt
-  cd mnt
-  ls -la
+III. Getting Started
+====================
 
-Well that worked, now what?
-  Start hacking together your own chunk database!!! 
-  (You can use the ZunkDB protocol as a base.)
+Fetch sample file system root from http://drze.net/junk/testfs
+Or create your own using mkfs.zunkfs.
+
+Create a place for your chunks, and mount the file system.
+
+$ wget http://drze.net/junk/testfs
+$ mkdir .chunks
+$ mkdir mnt
+$ ./zunkfs --chunk-db=rw,dir:$PWD/.chunks --chunk-db=ro,cmd:$PWD/fetch.sh \
+		      ./testfs ./mnt
+
+Now you can go into mnt and explore.
+
+IV. Chunk storage
+=================
+Zunkfs supports multiple back-ends for chunk storage (aka, chunk-db.)
+Chunk-dbs are specified as:
+
+	--chunk-db=<rw|ro>,<method:info>
+
+More thank one chunk-db may be specified at the command line. As chunks
+are needed, the dbs will be processed in order. Once a chunk is found,
+it is written into all preceeding, writable, chunk-dbs. For examlpe:
+
+	--chunk-db=rw,dir:$PWD/.chunks --chunk-db=ro,cmd:$PWD/fetch.sh
+
+will first try to find a chunk in a local directory $PWD/.chunks. If that
+fails it'll try to launch fetch.sh to get the chunk. If fetch.sh gets
+the chunk, the chunk will be written to $PWD/.chunks.
+
+* cmd:/path/to/command
+	This will launch command with one argument -- a hex representation
+	of the chunk name (SHA1 digest.)
+	It expects that the command will spew out chunk contents to stdout.
+	(See sample fetch.sh)
+
+	This method is read only.
+
+	Example:
+		./zunkfs --chunk-db=ro,cmd:$PWD/fetch.sh ./myfs /mount/point
+
+* dir:/path/to/chunks/dir
+	This will use a local filesystem for storing chunks.
+	It can be read-only or read-write.
+
+	Exmaple:
+		mkdir $PWD/.chunks
+		./zunkfs --chunk-db=rw,dir:$PWD/.chunks ./myfs /mount/point
+
+* map:/path/to/sqlite/database
+	A database that stores a mapping between normal file system files,
+	and chunks that compose them. 
+	This is read-only. The database must include a table with the following
+	schema:
+		CREATE TABLE chunk_map (
+			hash CHAR(20) PRIMARY KEY,
+			path VARCHAR(1024),
+			chunk_nr INTEGER
+		);
+
+	Example:
+		./zunkfs --chunk-db=ro,map:$PWD/map.db ./myfs /mount/point
+
+* mem:
+	Stores chunks in memory. Read/write.
+
+* sqlite:/path/to/sqlite/database
+	Stores chunks in an sqlite database. Read/write. Schema is:
+		CREATE TABLE chunk (
+			hash CHAR(20) PRIMARY KEY UNIQUE,
+			data BLOB
+		);
+
+	Example:
+		./zunkfs --chunk-db=rw,sqlite:$PWD/chunk.db ./myfs /mount/point
+
+* zunkdb:ip:port,timeout
+	Uses a ZunkDB to store and retrieve chunks. Connects to specified
+	IP:Port. Timeout is optional. See ZunkDB protocol spec.
+	Example:
+		./zunkfs --chunk-db=rw,zunkdb:127.0.0.1:9876 ./myfs /mount/point
+
 

@@ -4,11 +4,13 @@ I. Prerequisites:
 - FUSE
 - libevent (http://monkey.org/~provos/libevent/)
 - sqlite3
+- openssl
 
 Centos:
 	yum install fuse dkms-fuse fuse-devel
 	yum install libevent-devel
 	yum install sqlite-devel
+	yum install openssl-devel
 	# add your user to the fuse group - logout/login
 
 Gentoo:
@@ -18,6 +20,7 @@ Ubuntu/Debian:
 	apt-get install libfuse-dev
 	apt-get install libsqlite3-dev
 	apt-get install libevent-dev
+	apt-get install libssl-dev
 
 OSX + MacPorts:
 	port install libfuse

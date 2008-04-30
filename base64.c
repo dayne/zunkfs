@@ -2,7 +2,6 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
-#include <stdint.h>
 #include <sys/types.h>
 #include <event.h>
 #include "base64.h"

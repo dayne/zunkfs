@@ -76,7 +76,8 @@ static struct node *find_node(const struct sockaddr_in *sa)
 
 	lock(&cache_mutex);
 	for (node = node_cache; node; node = node->next) {
-		if (!memcmp(sa, &node->addr, sizeof(struct sockaddr_in))) {
+		if (sa->sin_addr.s_addr == node->addr.sin_addr.s_addr &&
+				sa->sin_port == node->addr.sin_port) {
 			cache_count --;
 			node_del(node);
 			break;
@@ -97,6 +98,8 @@ static void free_node(struct node *node)
 
 static void __cache_node(struct node *node)
 {
+	node->request = NULL;
+
 	node_del(node);
 	node_add(node, &node_cache);
 
@@ -235,8 +238,11 @@ again:
 	}
 }
 
-static inline void write_request(struct node *node, struct request *request)
+static void write_request(struct node *node, struct request *request)
 {
+	node->request = request;
+	node_add(node, &request->node_list);
+
 	bufferevent_base_set(request->base, node->bev);
 	bufferevent_write(node->bev, EVBUFFER_DATA(request->evbuf),
 			EVBUFFER_LENGTH(request->evbuf));
@@ -274,10 +280,6 @@ static int send_request_to(struct request *request,
 		free(node);
 		return -EIO;
 	}
-
-	node_add(node, &request->node_list);
-
-	node->request = request;
 
 	bufferevent_disable(node->bev, EV_READ | EV_WRITE);
 

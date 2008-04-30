@@ -167,29 +167,15 @@ static void store_node(struct request *request, char *addr_str)
 #define STORE_NODE		"store_node"
 #define STORE_NODE_LEN		(sizeof(STORE_NODE) - 1)
 
-static void readcb(struct bufferevent *bev, void *arg)
+static int proc_msg(const char *buf, size_t len, struct node *node)
 {
-	struct node *node = arg;
 	struct request *req = node->request;
-	size_t len;
-	const char *buf;
-	const char *end;
-	char *msg;
+	char *msg = alloca(len + 1);
 
-next:
-	buf = (const char *)EVBUFFER_DATA(bev->input);
-	end = (const char *)evbuffer_find(bev->input, (u_char *)"\r\n", 2);
-	if (!end)
-		return;
-
-	len = end - buf;
-	msg = alloca(len + 1);
 	assert(msg != NULL);
 
 	memcpy(msg, buf, len);
 	msg[len] = 0;
-
-	evbuffer_drain(bev->input, len + 2);
 
 	if (!strncmp(msg, STORE_CHUNK, STORE_CHUNK_LEN)) {
 		msg += STORE_CHUNK_LEN + 1;
@@ -197,15 +183,36 @@ next:
 
 	} else if (!strncmp(msg, REQUEST_DONE, REQUEST_DONE_LEN)) {
 		msg += REQUEST_DONE_LEN + 1;
-		if (!strcmp(msg, digest_string(req->digest)))
+		if (!strcmp(msg, digest_string(req->digest))) {
 			cache_node(node);
+			return 1;
+		}
 
 	} else if (!strncmp(msg, STORE_NODE, STORE_NODE_LEN)) {
 		msg += STORE_NODE_LEN + 1;
 		store_node(req, msg);
 	}
 
-	goto next;
+	return 0;
+}
+
+static void readcb(struct bufferevent *bev, void *arg)
+{
+	struct node *node = arg;
+	const char *buf;
+	const char *end;
+	int drain_all = 0;
+
+	for (;;) {
+		buf = (const char *)EVBUFFER_DATA(bev->input);
+		end = (const char *)evbuffer_find(bev->input, (u_char *)"\r\n", 2);
+		if (!end)
+			return;
+
+		if (!drain_all)
+			drain_all = proc_msg(buf, end - buf, node);
+		evbuffer_drain(bev->input, end - buf + 2);
+	}
 }
 
 static void errorcb(struct bufferevent *bev, short what, void *arg)

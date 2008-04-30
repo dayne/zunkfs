@@ -291,6 +291,8 @@ static int send_request_to(struct request *request,
 	return 0;
 }
 
+static void timeout_cb(int fd, short event, void *arg) { }
+
 static int send_request(struct evbuffer *evbuf, struct zdb_info *db_info,
 		const unsigned char *digest, unsigned char *chunk)
 {
@@ -318,7 +320,7 @@ static int send_request(struct evbuffer *evbuf, struct zdb_info *db_info,
 		return err;
 	}
 
-	timeout_set(&to_event, NULL, NULL);
+	timeout_set(&to_event, timeout_cb, NULL);
 	event_base_set(request.base, &to_event);
 	timeout_add(&to_event, &timeout);
 

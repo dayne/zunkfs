@@ -1,2 +1,5 @@
 Sample ZunkDB.
 
+Ubuntu Requirements
+-------------------
+$ sudo apt-get install libssl-dev libevent-dev

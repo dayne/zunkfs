@@ -17,6 +17,7 @@
 #include <libgen.h>
 
 #include <event.h>
+#include <evdns.h>
 
 #include "base64.h"
 
@@ -56,6 +57,20 @@ static struct sockaddr_in my_addr;
 
 #define NODE_VEC_MAX	5
 
+void dns_gethostbyname_cb(int result, char type, int count, int ttl, 
+                          void *addresses, void *arg)
+{
+  struct in_addr *addrs = addresses;
+	struct sockaddr_in *addr = arg;
+
+  if(result != 0) {
+    printf("Error looking up IP address.\n");
+  }
+  else {
+    addr->sin_addr = addrs[8];
+  }
+}
+
 static int store_node(char *addr_str)
 {
 	struct sockaddr_in addr;
@@ -67,12 +82,21 @@ static int store_node(char *addr_str)
 		return -EINVAL;
 
 	*port++ = 0;
+  printf("Got port: %s\n", port);
 	
 	addr.sin_family = AF_INET;
 	addr.sin_port = htons(atoi(port));
 
-	if (!inet_aton(addr_str, &addr.sin_addr))
-		return -EINVAL;
+	if (!inet_aton(addr_str, &addr.sin_addr)) {
+    evdns_init();
+    printf("Checking DNS...(%s)\n", addr_str);
+    // Check DNS
+    if(evdns_resolve_ipv4(addr_str, 0, dns_gethostbyname_cb, &addr)) {
+      printf("DNS Failed...(%s)\n", addr_str);
+      return -EINVAL;
+    }
+  }
+  printf("%x\n", *(uint32_t *)&addr.sin_addr);
 
 	for (node = node_head; node; node = node->next)
 		if (!memcmp(&addr, &node->addr, sizeof(struct sockaddr_in)))
@@ -494,6 +518,11 @@ int main(int argc, char **argv)
 
 	strcat(cwd, "/.chunks");
 
+	if (!event_init()) {
+		fprintf(stderr, "event_init: %s\n", strerror(errno));
+		exit(-2);
+	}
+
 	while ((opt = getopt_long(argc, argv, "", opts, NULL)) != -1) {
 		err = proc_opt(opt, optarg);
 		if (err)
@@ -524,10 +553,6 @@ int main(int argc, char **argv)
 		exit(-1);
 	}
 
-	if (!event_init()) {
-		fprintf(stderr, "event_init: %s\n", strerror(errno));
-		exit(-2);
-	}
 
 	event_set(&accept_event, sk, EV_READ|EV_PERSIST, accept_client, NULL);
 	event_add(&accept_event, NULL);

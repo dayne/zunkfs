@@ -17,6 +17,7 @@
 #include <libgen.h>
 
 #include <event.h>
+#include <evdns.h>
 
 #include "base64.h"
 
@@ -56,6 +57,20 @@ static struct sockaddr_in my_addr;
 
 #define NODE_VEC_MAX	5
 
+void dns_gethostbyname_cb(int result, char type, int count, int ttl, 
+                          void *addresses, void *arg)
+{
+  struct in_addr *addrs = addresses;
+	struct sockaddr_in *addr = arg;
+
+  if(result != 0) {
+    printf("Error looking up IP address.\n");
+  }
+  else {
+    addr->sin_addr = addrs[8];
+  }
+}
+
 static int store_node(char *addr_str)
 {
 	struct sockaddr_in addr;
@@ -67,12 +82,21 @@ static int store_node(char *addr_str)
 		return -EINVAL;
 
 	*port++ = 0;
+  printf("Got port: %s\n", port);
 	
 	addr.sin_family = AF_INET;
 	addr.sin_port = htons(atoi(port));
 
-	if (!inet_aton(addr_str, &addr.sin_addr))
-		return -EINVAL;
+	if (!inet_aton(addr_str, &addr.sin_addr)) {
+    evdns_init();
+    printf("Checking DNS...(%s)\n", addr_str);
+    // Check DNS
+    if(evdns_resolve_ipv4(addr_str, 0, dns_gethostbyname_cb, &addr)) {
+      printf("DNS Failed...(%s)\n", addr_str);
+      return -EINVAL;
+    }
+  }
+  printf("%x\n", *(uint32_t *)&addr.sin_addr);
 
 	for (node = node_head; node; node = node->next)
 		if (!memcmp(&addr, &node->addr, sizeof(struct sockaddr_in)))
@@ -400,12 +424,14 @@ enum {
 	OPT_HELP,
 	OPT_PEER,
 	OPT_ADDR,
+	OPT_PATH,
 };
 
 static struct option opts[] = {
 	{ "help", no_argument, NULL, OPT_HELP },
 	{ "peer", required_argument, NULL, OPT_PEER },
 	{ "addr", required_argument, NULL, OPT_ADDR },
+	{ "chunk-dir", required_argument, NULL, OPT_PATH },
 	{ NULL }
 };
 
@@ -415,7 +441,8 @@ static void usage(int exit_code)
 	show_opt("Usage: %s [ options ]\n", prog);
 	show_opt("--help\n");
 	show_opt("--peer <ip:port>    connect to this peer\n");
-	show_opt("--addr <[ip:]port>  listen on specified IP and port.\n");
+	show_opt("--addr <[ip:]port>  listen on specified IP and port\n");
+	show_opt("--chunk-dir <path>  path to chunk directory\n");
 	exit(exit_code);
 }
 
@@ -449,6 +476,22 @@ static int proc_opt(int opt, char *arg)
 		}
 
 		return 0;
+	case OPT_PATH:
+		if (arg[0] != '/') {
+			fprintf(stderr, "Must supply full path to "
+					"chunks dir.\n");
+			return -EINVAL;
+		}
+
+		if (access(arg, R_OK|W_OK|X_OK)) {
+			int err = -errno;
+			fprintf(stderr, "%s: %s\n", arg, strerror(-err));
+			return err;
+		}
+
+		value_dir = arg;
+		return 0;
+
 	default:
 		return -1;
 	}
@@ -466,6 +509,20 @@ int main(int argc, char **argv)
 	my_addr.sin_addr.s_addr = INADDR_ANY;
 	my_addr.sin_port = htons(9876);
 
+	getcwd(cwd, PATH_MAX);
+
+	if (strlen(cwd) >= PATH_MAX - sizeof("/.chunks")) {
+		fprintf(stderr, "cwd: %s\n", strerror(ENAMETOOLONG));
+		exit(-1);
+	}
+
+	strcat(cwd, "/.chunks");
+
+	if (!event_init()) {
+		fprintf(stderr, "event_init: %s\n", strerror(errno));
+		exit(-2);
+	}
+
 	while ((opt = getopt_long(argc, argv, "", opts, NULL)) != -1) {
 		err = proc_opt(opt, optarg);
 		if (err)
@@ -474,13 +531,6 @@ int main(int argc, char **argv)
 
 	if (optind != argc)
 		usage(-1);
-
-	getcwd(cwd, PATH_MAX);
-
-	if (asprintf(&value_dir, "%s/.chunks", cwd) == -1) {
-		fprintf(stderr, "%s\n", strerror(errno));
-		exit(-1);
-	}
 
 	sk = socket(AF_INET, SOCK_STREAM, 0);
 	if (sk < 0) {
@@ -503,10 +553,6 @@ int main(int argc, char **argv)
 		exit(-1);
 	}
 
-	if (!event_init()) {
-		fprintf(stderr, "event_init: %s\n", strerror(errno));
-		exit(-2);
-	}
 
 	event_set(&accept_event, sk, EV_READ|EV_PERSIST, accept_client, NULL);
 	event_add(&accept_event, NULL);

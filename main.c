@@ -13,6 +13,8 @@
 #include <limits.h>
 #include <openssl/sha.h>
 #include <unistd.h>
+#include <getopt.h>
+#include <libgen.h>
 
 #include <event.h>
 
@@ -21,18 +23,129 @@
 struct client {
 	int fd;
 	struct bufferevent *bev;
+	struct sockaddr_in addr;
 };
+
+struct node {
+	struct sockaddr_in addr;
+	unsigned char id[SHA_DIGEST_LENGTH];
+	struct node *next;
+};
+
+#define node_addr(node)		((node)->addr.sin_addr)
+#define node_addr_string(node)	inet_ntoa(node_addr(node))
+#define node_port(node)		ntohs((node)->addr.sin_port)
 
 #define FIND_VALUE		"find_chunk"
 #define FIND_VALUE_LEN		(sizeof(FIND_VALUE) - 1)
 #define STORE_VALUE		"store_chunk"
 #define STORE_VALUE_LEN		(sizeof(STORE_VALUE) - 1)
 #define REQUEST_DONE		"request_done"
-#define REQUEST_DONE_LEN	(sizeof(REQUEST_DONE)-1)
+#define REQUEST_DONE_LEN	(sizeof(REQUEST_DONE) - 1)
+#define STORE_NODE		"store_node"
+#define STORE_NODE_LEN		(sizeof(STORE_NODE) - 1)
 
 static char *value_dir = NULL;
-
 static const char hex_digits[] = "0123456789abcdef";
+
+static struct node *node_head = NULL;
+static struct node **node_tailp = &node_head;
+
+static char *prog;
+static struct sockaddr_in my_addr;
+
+#define NODE_VEC_MAX	5
+
+static int store_node(char *addr_str)
+{
+	struct sockaddr_in addr;
+	struct node *node;
+	char *port;
+
+	port = strchr(addr_str, ':');
+	if (!port)
+		return -EINVAL;
+
+	*port++ = 0;
+	
+	addr.sin_family = AF_INET;
+	addr.sin_port = htons(atoi(port));
+
+	if (!inet_aton(addr_str, &addr.sin_addr))
+		return -EINVAL;
+
+	for (node = node_head; node; node = node->next)
+		if (!memcmp(&addr, &node->addr, sizeof(struct sockaddr_in)))
+			return -EEXIST;
+
+	node = malloc(sizeof(struct node));
+	if (!node)
+		return -ENOMEM;
+
+	node->addr = addr;
+	SHA1((void *)&node->addr, sizeof(struct sockaddr_in), node->id);
+
+	node->next = NULL;
+	*node_tailp = node;
+	node_tailp = &node->next;
+
+	printf("added node %s:%u\n", node_addr_string(node), node_port(node));
+
+	return 0;
+}
+
+static int distance(const void *va, const void *vb)
+{
+	const unsigned *a = va;
+	const unsigned *b = vb;
+	int i;
+
+	for (i = 0; i < 5; i ++) {
+		unsigned bit = ffs(a[i] ^ b[i]);
+		if (bit)
+			return 160 - (bit + i * 32);
+	}
+
+	return -1;
+}
+
+static int nearest_nodes(const char *key_str, struct node **node_vec, int max)
+{
+	unsigned char key[SHA_DIGEST_LENGTH];
+	const char *a, *b;
+	int d, i, dist_vec[max], count = -1;
+	struct node *node;
+
+	if (strlen(key_str) < SHA_DIGEST_LENGTH*2)
+		return 0;
+
+	for (i = 0; i < SHA_DIGEST_LENGTH; i ++) {
+		a = strchr(hex_digits, *key_str++);
+		b = strchr(hex_digits, *key_str++);
+		if (!a || !b)
+			return 0;
+
+		key[i] = (a - hex_digits) | ((b - hex_digits) << 4);
+	}
+
+	for (i = 0; i < max; i ++)
+		node_vec[i] = NULL;
+
+	for (node = node_head; node; node = node->next) {
+		d = distance(key, node->id);
+		for (i = 0; i < max; i ++) {
+			if (!node_vec[i] || d < dist_vec[i]) {
+				node_vec[i] = node;
+				dist_vec[i] = d;
+				if (count < i)
+					count = i;
+				break;
+			}
+		}
+	}
+
+	return count + 1;
+}
 
 static unsigned char *find_value(const char *key_str, size_t *size)
 {
@@ -161,6 +274,8 @@ static void cl_read_cb(struct bufferevent *bev, void *arg)
 	unsigned char *value;
 	const char *key_str;
 	size_t value_size;
+	struct node *node_vec[NODE_VEC_MAX];
+	int i, node_count;
 
 	end = (const char *)evbuffer_find(input, (u_char *)"\r\n", 2);
 	if (!end)
@@ -187,6 +302,18 @@ static void cl_read_cb(struct bufferevent *bev, void *arg)
 			base64_encode_evbuf(output, value, value_size);
 			free(value);
 			evbuffer_add(output, "\r\n", 2);
+		} else {
+			node_count =
+				nearest_nodes(msg, node_vec, NODE_VEC_MAX);
+			if (node_count < 0)
+				goto out;
+
+			for (i = 0; i < node_count; i ++) {
+				evbuffer_add_printf(output, "%s %s:%u\r\n",
+						STORE_NODE,
+						node_addr_string(node_vec[i]),
+						node_port(node_vec[i]));
+			}
 		}
 
 		evbuffer_add_printf(output, "%s %s\r\n", REQUEST_DONE, msg);
@@ -207,6 +334,18 @@ static void cl_read_cb(struct bufferevent *bev, void *arg)
 		value_size = base64_decode(msg, value, len);
 		key_str = sha1_string(value, value_size);
 		store_value(value, value_size, key_str);
+
+		node_count = nearest_nodes(msg, node_vec, NODE_VEC_MAX);
+		if (node_count < 0)
+			goto out;
+
+		for (i = 0; i < node_count; i ++) {
+			evbuffer_add_printf(output, "%s %s:%u\r\n",
+					STORE_NODE,
+					node_addr_string(node_vec[i]),
+					node_port(node_vec[i]));
+		}
+
 		evbuffer_add_printf(output, "%s %s\r\n", REQUEST_DONE, key_str);
 		bufferevent_write_buffer(bev, output);
 		evbuffer_free(output);
@@ -230,7 +369,6 @@ static void cl_error_cb(struct bufferevent *bev, short what, void *arg)
 static void accept_client(int fd, short event, void *arg)
 {
 	struct client *cl;
-	struct sockaddr_in addr;
 	socklen_t addr_len;
 
 	cl = malloc(sizeof(struct client));
@@ -239,7 +377,7 @@ static void accept_client(int fd, short event, void *arg)
 
 	addr_len = sizeof(struct sockaddr_in);
 
-	cl->fd = accept(fd, (struct sockaddr *)&addr, &addr_len);
+	cl->fd = accept(fd, (struct sockaddr *)&cl->addr, &addr_len);
 	if (cl->fd == -1) {
 		free(cl);
 		return;
@@ -255,15 +393,87 @@ static void accept_client(int fd, short event, void *arg)
 	bufferevent_enable(cl->bev, EV_READ);
 	bufferevent_enable(cl->bev, EV_WRITE);
 
-	printf("client connected: %p %s\n", cl, inet_ntoa(addr.sin_addr));
+	printf("client connected: %p %s\n", cl, inet_ntoa(cl->addr.sin_addr));
+}
+
+enum {
+	OPT_HELP,
+	OPT_PEER,
+	OPT_ADDR,
+};
+
+static struct option opts[] = {
+	{ "help", no_argument, NULL, OPT_HELP },
+	{ "peer", required_argument, NULL, OPT_PEER },
+	{ "addr", required_argument, NULL, OPT_ADDR },
+	{ NULL }
+};
+
+static void usage(int exit_code)
+{
+#define show_opt(opt...) fprintf(stderr, opt)
+	show_opt("Usage: %s [ options ]\n", prog);
+	show_opt("--help\n");
+	show_opt("--peer <ip:port>    connect to this peer\n");
+	show_opt("--addr <[ip:]port>  listen on specified IP and port.\n");
+	exit(exit_code);
+}
+
+static int proc_opt(int opt, char *arg)
+{
+	char *port;
+	int err;
+
+	switch(opt) {
+	case OPT_HELP:
+		usage(0);
+	case OPT_PEER:
+		err = store_node(arg);
+		if (err && err != -EEXIST) {
+			fprintf(stderr, "Invalid peer.\n");
+			return err;
+		}
+		return 0;
+	case OPT_ADDR:
+		port = strchr(arg, ':');
+		if (!port) {
+			fprintf(stderr, "No port in address %s.\n", arg);
+			return -EINVAL;
+		}
+		*port++ = 0;
+
+		my_addr.sin_port = htons(atoi(port));
+		if (*arg && !inet_aton(arg, &my_addr.sin_addr)) {
+			fprintf(stderr, "Invalid address %s.\n", arg);
+			return -EINVAL;
+		}
+
+		return 0;
+	default:
+		return -1;
+	}
 }
 
 int main(int argc, char **argv)
 {
-	struct sockaddr_in addr;
 	struct event accept_event;
-	int sk, reuse = 1;
+	int sk, reuse = 1, opt, err;
 	char cwd[PATH_MAX];
+
+	prog = basename(argv[0]);
+
+	my_addr.sin_family = AF_INET;
+	my_addr.sin_addr.s_addr = INADDR_ANY;
+	my_addr.sin_port = htons(9876);
+
+	while ((opt = getopt_long(argc, argv, "", opts, NULL)) != -1) {
+		err = proc_opt(opt, optarg);
+		if (err)
+			usage(err);
+	}
+
+	if (optind != argc)
+		usage(-1);
 
 	getcwd(cwd, PATH_MAX);
 
@@ -271,10 +481,6 @@ int main(int argc, char **argv)
 		fprintf(stderr, "%s\n", strerror(errno));
 		exit(-1);
 	}
-
-	addr.sin_family = AF_INET;
-	addr.sin_addr.s_addr = INADDR_ANY;
-	addr.sin_port = htons(9876);
 
 	sk = socket(AF_INET, SOCK_STREAM, 0);
 	if (sk < 0) {
@@ -287,7 +493,7 @@ int main(int argc, char **argv)
 		exit(-1);
 	}
 
-	if (bind(sk, (struct sockaddr *)&addr, sizeof(struct sockaddr_in))) {
+	if (bind(sk, (struct sockaddr *)&my_addr, sizeof(struct sockaddr_in))) {
 		fprintf(stderr, "bind: %s\n", strerror(errno));
 		exit(-1);
 	}
@@ -304,6 +510,9 @@ int main(int argc, char **argv)
 
 	event_set(&accept_event, sk, EV_READ|EV_PERSIST, accept_client, NULL);
 	event_add(&accept_event, NULL);
+
+	printf("Listening on %s:%u\n", inet_ntoa(my_addr.sin_addr),
+			ntohs(my_addr.sin_port));
 
 	event_dispatch();
 

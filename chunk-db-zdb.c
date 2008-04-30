@@ -38,6 +38,7 @@ struct request {
 	struct node *node_list;
 	struct sockaddr_in *addr_list;
 	unsigned addr_count;
+	unsigned done;
 };
 
 struct node {
@@ -179,11 +180,15 @@ static int proc_msg(const char *buf, size_t len, struct node *node)
 
 	if (!strncmp(msg, STORE_CHUNK, STORE_CHUNK_LEN)) {
 		msg += STORE_CHUNK_LEN + 1;
-		base64_decode(msg, req->chunk, CHUNK_SIZE);
+		if (req->chunk) {
+			base64_decode(msg, req->chunk, CHUNK_SIZE);
+			req->chunk = NULL;
+		}
 
 	} else if (!strncmp(msg, REQUEST_DONE, REQUEST_DONE_LEN)) {
 		msg += REQUEST_DONE_LEN + 1;
 		if (!strcmp(msg, digest_string(req->digest))) {
+			req->done ++;
 			cache_node(node);
 			return 1;
 		}
@@ -318,6 +323,7 @@ static int send_request(struct evbuffer *evbuf, struct zdb_info *db_info,
 	request.node_list = NULL;
 	request.addr_list = NULL;
 	request.addr_count = 0;
+	request.done = 0;
 
 	request.base = event_base_new();
 	if (!request.base) {
@@ -335,15 +341,25 @@ static int send_request(struct evbuffer *evbuf, struct zdb_info *db_info,
 	event_base_set(request.base, &to_event);
 	timeout_add(&to_event, &timeout);
 
+	err = -EIO;
 	for (;;) {
+		if (!timeout_pending(&to_event, &timeout))
+			break;
 		if (!request.node_list)
 			break;
 		if (event_base_loop(request.base, EVLOOP_ONCE))
 			break;
-		if (chunk && verify_chunk(chunk, digest))
+		if (!request.done)
+			continue;
+		if (!chunk)
+			err = CHUNK_SIZE;
+		else if (!request.chunk && verify_chunk(chunk, digest)) {
+			err = CHUNK_SIZE;
 			break;
-		if (!timeout_pending(&to_event, &timeout))
-			break;
+		} else {
+			request.chunk = chunk;
+			request.done --;
+		}
 	}
 
 	timeout_del(&to_event);
@@ -358,7 +374,7 @@ static int send_request(struct evbuffer *evbuf, struct zdb_info *db_info,
 	evbuffer_free(request.evbuf);
 	event_base_free(request.base);
 
-	return CHUNK_SIZE;
+	return err;
 }
 
 static int zdb_read_chunk(unsigned char *chunk, const unsigned char *digest,

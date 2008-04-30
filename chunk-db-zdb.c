@@ -210,7 +210,8 @@ static void readcb(struct bufferevent *bev, void *arg)
 
 	for (;;) {
 		buf = (const char *)EVBUFFER_DATA(bev->input);
-		end = (const char *)evbuffer_find(bev->input, (u_char *)"\r\n", 2);
+		end = (const char *)evbuffer_find(bev->input,
+				(u_char *)"\r\n", 2);
 		if (!end)
 			return;
 

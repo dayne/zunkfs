@@ -176,6 +176,7 @@ static void readcb(struct bufferevent *bev, void *arg)
 	const char *end;
 	char *msg;
 
+next:
 	buf = (const char *)EVBUFFER_DATA(bev->input);
 	end = (const char *)evbuffer_find(bev->input, (u_char *)"\r\n", 2);
 	if (!end)
@@ -183,8 +184,7 @@ static void readcb(struct bufferevent *bev, void *arg)
 
 	len = end - buf;
 	msg = alloca(len + 1);
-	if (!msg)
-		return;
+	assert(msg != NULL);
 
 	memcpy(msg, buf, len);
 	msg[len] = 0;
@@ -204,6 +204,8 @@ static void readcb(struct bufferevent *bev, void *arg)
 		msg += STORE_NODE_LEN + 1;
 		store_node(req, msg);
 	}
+
+	goto next;
 }
 
 static void errorcb(struct bufferevent *bev, short what, void *arg)

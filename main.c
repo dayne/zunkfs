@@ -19,17 +19,19 @@
 #include <event.h>
 
 #include "base64.h"
+#include "list.h"
 
 struct client {
 	int fd;
 	struct bufferevent *bev;
 	struct sockaddr_in addr;
+	struct list_head cl_entry;
 };
 
 struct node {
 	struct sockaddr_in addr;
 	unsigned char id[SHA_DIGEST_LENGTH];
-	struct node *next;
+	struct list_head nd_entry;
 };
 
 #define node_addr(node)		((node)->addr.sin_addr)
@@ -48,8 +50,8 @@ struct node {
 static char *value_dir = NULL;
 static const char hex_digits[] = "0123456789abcdef";
 
-static struct node *node_head = NULL;
-static struct node **node_tailp = &node_head;
+static LIST_HEAD(node_list);
+static LIST_HEAD(client_list);
 
 static char *prog;
 static struct sockaddr_in my_addr;
@@ -74,7 +76,7 @@ static int store_node(char *addr_str)
 	if (!inet_aton(addr_str, &addr.sin_addr))
 		return -EINVAL;
 
-	for (node = node_head; node; node = node->next)
+	list_for_each_entry(node, &node_list, nd_entry)
 		if (!memcmp(&addr, &node->addr, sizeof(struct sockaddr_in)))
 			return -EEXIST;
 
@@ -85,9 +87,7 @@ static int store_node(char *addr_str)
 	node->addr = addr;
 	SHA1((void *)&node->addr, sizeof(struct sockaddr_in), node->id);
 
-	node->next = NULL;
-	*node_tailp = node;
-	node_tailp = &node->next;
+	list_add_tail(&node->nd_entry, &node_list);
 
 	printf("added node %s:%u\n", node_addr_string(node), node_port(node));
 
@@ -131,7 +131,7 @@ static int nearest_nodes(const char *key_str, struct node **node_vec, int max)
 	for (i = 0; i < max; i ++)
 		node_vec[i] = NULL;
 
-	for (node = node_head; node; node = node->next) {
+	list_for_each_entry(node, &node_list, nd_entry) {
 		d = distance(key, node->id);
 		for (i = 0; i < max; i ++) {
 			if (!node_vec[i] || d < dist_vec[i]) {
@@ -199,7 +199,7 @@ static unsigned char *find_value(const char *key_str, size_t *size)
 
 	n = read(fd, value, st.st_size);
 	if (n < 0) 
-		fprintf(stderr, "find_value: read error: %s\n", strerror(errno));
+		fprintf(stderr, "find_value read error: %s\n", strerror(errno));
 
 	close(fd);
 
@@ -257,6 +257,7 @@ static void store_value(const unsigned char *value, size_t size,
 
 static void kill_client(struct client *cl)
 {
+	list_del(&cl->cl_entry);
 	close(cl->fd);
 	bufferevent_free(cl->bev);
 	free(cl);
@@ -361,9 +362,19 @@ static void cl_error_cb(struct bufferevent *bev, short what, void *arg)
 {
 	struct client *cl = arg;
 	printf("client disconnected: %p\n", cl);
-	close(cl->fd);
-	bufferevent_free(cl->bev);
-	free(cl);
+	kill_client(cl);
+}
+
+static int trim_clients(void)
+{
+	struct client *cl;
+
+	if (list_empty(&client_list))
+		return 0;
+
+	cl = list_entry(client_list.prev, struct client, cl_entry);
+	kill_client(cl);
+	return 1;
 }
 
 static void accept_client(int fd, short event, void *arg)
@@ -377,8 +388,14 @@ static void accept_client(int fd, short event, void *arg)
 
 	addr_len = sizeof(struct sockaddr_in);
 
+again:
 	cl->fd = accept(fd, (struct sockaddr *)&cl->addr, &addr_len);
 	if (cl->fd == -1) {
+		if (errno == EAGAIN)
+			goto again;
+		if ((errno == ENFILE || errno == EMFILE) && trim_clients())
+			goto again;
+
 		free(cl);
 		return;
 	}
@@ -390,8 +407,9 @@ static void accept_client(int fd, short event, void *arg)
 		return;
 	}
 
-	bufferevent_enable(cl->bev, EV_READ);
-	bufferevent_enable(cl->bev, EV_WRITE);
+	list_add(&cl->cl_entry, &client_list);
+
+	bufferevent_enable(cl->bev, EV_READ | EV_WRITE);
 
 	printf("client connected: %p %s\n", cl, inet_ntoa(cl->addr.sin_addr));
 }
@@ -540,4 +558,5 @@ int main(int argc, char **argv)
 	fprintf(stderr, "Event processing done.\n");
 	return 0;
 }
+
 

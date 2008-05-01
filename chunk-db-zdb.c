@@ -243,6 +243,8 @@ again:
 		return;
 	}
 
+	TRACE("%s\n", strerror(errno));
+
 	if (errno == EINTR)
 		goto again;
 
@@ -268,6 +270,7 @@ static int send_request_to(struct request *request,
 		const struct sockaddr_in *addr)
 {
 	struct node *node;
+	int fl;
 
 	node = find_node(addr);
 	if (node) {
@@ -289,6 +292,9 @@ static int send_request_to(struct request *request,
 		return -EIO;
 	}
 
+	fl = fcntl(node->sk, F_GETFL);
+	fcntl(node->sk, F_SETFL, fl | O_NONBLOCK);
+
 	node->bev = bufferevent_new(node->sk, readcb, NULL, errorcb, node);
 	if (!node->bev) {
 		ERROR("bufferevent_new: %s\n", strerror(errno));
@@ -309,7 +315,10 @@ static int send_request_to(struct request *request,
 	return 0;
 }
 
-static void timeout_cb(int fd, short event, void *arg) { }
+static void timeout_cb(int fd, short event, void *arg)
+{
+	TRACE("request=%p\n", arg);
+}
 
 static int send_request(struct evbuffer *evbuf, struct zdb_info *db_info,
 		const unsigned char *digest, unsigned char *chunk)
@@ -339,7 +348,7 @@ static int send_request(struct evbuffer *evbuf, struct zdb_info *db_info,
 		return err;
 	}
 
-	timeout_set(&to_event, timeout_cb, NULL);
+	timeout_set(&to_event, timeout_cb, &request);
 	event_base_set(request.base, &to_event);
 	timeout_add(&to_event, &timeout);
 

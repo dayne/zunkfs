@@ -154,6 +154,7 @@ static void store_node(struct request *request, char *addr_str)
 		return;
 
 	uaddr[i] = addr;
+	request->addr_list = uaddr;
 	request->addr_count ++;
 
 	send_request_to(request, &addr);

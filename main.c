@@ -120,37 +120,51 @@ static void dns_resolvecb(int result, char type, int count, int ttl,
 {
 	struct in_addr *addrs = addresses;
 	struct sockaddr_in sa;
-	char * port = arg;
+	char *addr_str = arg;
+	char *port;
 
-	if(result != 0) {
-		printf("Name resolution failed.\n");
+	assert(addr_str != NULL);
+
+	port = addr_str + strlen(addr_str) + 1;
+
+	if(result != DNS_ERR_NONE || type != DNS_IPv4_A) {
+		printf("Failed to resolve %s.\n", addr_str);
+		free(addr_str);
 		return;
 	}
+
+	printf("Resolved %s to be %s\n", addr_str, inet_ntoa(*addrs));
 
 	sa.sin_addr = *addrs;
 	sa.sin_port = htons(atoi(port));
 
 	store_node(&sa);
+	free(addr_str);
 }
 
-static int dns_resolve(char *arg) 
+static int dns_resolve(char *addr_str) 
 {
 	struct sockaddr_in *addr;
+	char *addr_str_copy;
 	char *port;
 
-	addr = string_sockaddr_in(arg);
+	addr = string_sockaddr_in(addr_str);
 	if (addr)
 		return store_node(addr);
+
+	addr_str_copy = strdup(addr_str);
+	if (!addr_str_copy)
+		return -ENOMEM;
        
-	port = strchr(arg, ':');
+	port = strchr(addr_str_copy, ':');
 	if(!port)
 		return -EINVAL;
 	*port++ = 0;
 
-	printf("Resolving %s... \n", arg);
+	printf("Resolving %s... \n", addr_str_copy);
 
-	if(evdns_resolve_ipv4(arg,0, dns_resolvecb, port)) {
-		printf("Failed to resolve %s.\n", arg);
+	if(evdns_resolve_ipv4(addr_str, 0, dns_resolvecb, addr_str_copy)) {
+		printf("Failed to resolve %s.\n", addr_str_copy);
 		return -EINVAL;
 	}
 

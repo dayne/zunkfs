@@ -104,17 +104,14 @@ void dns_gethostbyname_cb(int result, char type, int count, int ttl,
 {
   struct in_addr *addrs = addresses;
 	char * port = arg;
-  char * addr_str = calloc(32, sizeof(char));
+  char addr_str[32];
   if(result != 0) {
     printf("Name resolution failed.\n");
-    exit(1);
+    return;
   }
-  strcpy(addr_str, inet_ntoa(addrs[0]));
-  strcat(addr_str, ":");
-  strcat(addr_str, port);
+  sprintf(addr_str, "%s:%s", inet_ntoa(addrs[0]), port);
 
   store_node(addr_str);
-  free(addr_str);
 }
 
 // Wrapper function for DNS
@@ -129,10 +126,9 @@ static int dns_resolve(char * arg)
     return store_node(arg);
   }
 
-  evdns_init();
   printf("Resolving %s... \n", arg);
   if(evdns_resolve_ipv4(arg,0, dns_gethostbyname_cb, port)) {
-    printf("Failed.\n");
+    printf("Failed to resolve %s.\n", arg);
     return -EINVAL;
   }
   return 0;
@@ -475,7 +471,6 @@ static int proc_opt(int opt, char *arg)
 	case OPT_HELP:
 		usage(0);
 	case OPT_PEER:
-    evdns_init();
     err = dns_resolve(arg);
 		if (err && err != -EEXIST) {
 			fprintf(stderr, "Invalid peer.\n");
@@ -541,6 +536,11 @@ int main(int argc, char **argv)
 
 	if (!event_init()) {
 		fprintf(stderr, "event_init: %s\n", strerror(errno));
+		exit(-2);
+	}
+
+	if (evdns_init()) {
+		fprintf(stderr, "evdns_init: %s\n", strerror(errno));
 		exit(-2);
 	}
 

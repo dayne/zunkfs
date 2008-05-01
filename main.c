@@ -57,19 +57,7 @@ static struct sockaddr_in my_addr;
 
 #define NODE_VEC_MAX	5
 
-void dns_gethostbyname_cb(int result, char type, int count, int ttl, 
-                          void *addresses, void *arg)
-{
-  struct in_addr *addrs = addresses;
-	struct sockaddr_in *addr = arg;
 
-  if(result != 0) {
-    printf("Error looking up IP address.\n");
-  }
-  else {
-    addr->sin_addr = addrs[8];
-  }
-}
 
 static int store_node(char *addr_str)
 {
@@ -88,16 +76,8 @@ static int store_node(char *addr_str)
 	addr.sin_port = htons(atoi(port));
 
 	if (!inet_aton(addr_str, &addr.sin_addr)) {
-    evdns_init();
-    printf("Checking DNS...(%s)\n", addr_str);
-    // Check DNS
-    if(evdns_resolve_ipv4(addr_str, 0, dns_gethostbyname_cb, &addr)) {
-      printf("DNS Failed...(%s)\n", addr_str);
-      return -EINVAL;
-    }
+    return -EINVAL;
   }
-  printf("%x\n", *(uint32_t *)&addr.sin_addr);
-
 	for (node = node_head; node; node = node->next)
 		if (!memcmp(&addr, &node->addr, sizeof(struct sockaddr_in)))
 			return -EEXIST;
@@ -116,6 +96,37 @@ static int store_node(char *addr_str)
 	printf("added node %s:%u\n", node_addr_string(node), node_port(node));
 
 	return 0;
+}
+
+// DNS callback
+void dns_gethostbyname_cb(int result, char type, int count, int ttl, 
+                          void *addresses, void *arg)
+{
+  struct in_addr *addrs = addresses;
+	char * port = arg;
+  char * addr_str = calloc(32, sizeof(char));
+  if(result != 0) {
+    return;
+  }
+  strcpy(addr_str, inet_ntoa(addrs[0]));
+  strcat(addr_str, ":");
+  strcat(addr_str, port);
+
+  store_node(addr_str);
+  free(addr_str);
+}
+
+// Wrapper function for DNS
+static int dns_resolve(char * arg) 
+{
+  char * port = strchr(arg, ':');
+  *port++ = 0;
+  evdns_init();
+  if(evdns_resolve_ipv4(arg,0, dns_gethostbyname_cb, port)) {
+    printf("Failed.\n");
+    return -EINVAL;
+  }
+  return 0;
 }
 
 static int distance(const void *va, const void *vb)
@@ -455,7 +466,8 @@ static int proc_opt(int opt, char *arg)
 	case OPT_HELP:
 		usage(0);
 	case OPT_PEER:
-		err = store_node(arg);
+    evdns_init();
+    err = dns_resolve(arg);
 		if (err && err != -EEXIST) {
 			fprintf(stderr, "Invalid peer.\n");
 			return err;

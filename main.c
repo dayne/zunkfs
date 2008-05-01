@@ -27,6 +27,7 @@ struct node {
 	struct bufferevent *bev;
 	struct sockaddr_in addr;
 	struct list_head nd_entry;
+	struct event connect_event;
 };
 
 #define node_addr(node)		((node)->addr.sin_addr)
@@ -41,6 +42,8 @@ struct node {
 #define REQUEST_DONE_LEN	(sizeof(REQUEST_DONE) - 1)
 #define STORE_NODE		"store_node"
 #define STORE_NODE_LEN		(sizeof(STORE_NODE) - 1)
+
+#define NODE_VEC_MAX	5
 
 static char *value_dir = NULL;
 static const char hex_digits[] = "0123456789abcdef";
@@ -93,11 +96,103 @@ static struct sockaddr_in *__string_sockaddr_in(const char *str,
 #define string_sockaddr_in(addr_str) \
 	__string_sockaddr_in(addr_str, alloca(sizeof(struct sockaddr_in)))
 
-#define NODE_VEC_MAX	5
+static void free_node(struct node *node)
+{
+	event_del(&node->connect_event);
+	list_del(&node->nd_entry);
+	close(node->fd);
+	bufferevent_free(node->bev);
+	free(node);
+}
+
+static int trim_nodes(void)
+{
+	struct list_head *list;
+
+	if (!list_empty(&client_list))
+		list = &client_list;
+	else if (!list_empty(&node_list))
+		list = &node_list;
+	else
+		return 0;
+
+	free_node(list_entry(list->prev, struct node, nd_entry));
+	return 1;
+}
+
+static void connectcb(int fd, short event, void *arg)
+{
+	struct node *node = arg;
+	int err;
+
+	if (!connect(fd, (struct sockaddr *)&node->addr,
+				sizeof(struct sockaddr_in)) ||
+			errno == EISCONN) {
+		printf("Connected to peer %s:%u\n", 
+				inet_ntoa(node->addr.sin_addr),
+				ntohs(node->addr.sin_port));
+		bufferevent_enable(node->bev, EV_READ | EV_WRITE);
+		return;
+	}
+
+	if (errno == EALREADY || errno == EINPROGRESS) {
+		event_add(&node->connect_event, NULL);
+		return;
+	}
+
+	err = errno;
+	printf("Failed to connect to %s:%u: %s\n", 
+			inet_ntoa(node->addr.sin_addr),
+			ntohs(node->addr.sin_port),
+			strerror(err));
+
+	free_node(node);
+}
+
+static void readcb(struct bufferevent *bev, void *arg);
+static void errorcb(struct bufferevent *bev, short what, void *arg);
+
+static int setup_node(struct node *node)
+{
+	event_set(&node->connect_event, node->fd, EV_WRITE, connectcb, node);
+
+	node->bev = bufferevent_new(node->fd, readcb, NULL, errorcb, node);
+	if (!node->bev) {
+		close(node->fd);
+		free(node);
+		return -ENOMEM;
+	}
+
+	return 0;
+}
+
+static int connect_node(struct node *node)
+{
+	struct evbuffer *evbuf;
+
+	evbuf = evbuffer_new();
+	if (!evbuf) {
+		printf("eek: failed to allocated evbuffer\n");
+		free_node(node);
+		return -ENOMEM;
+	}
+
+	bufferevent_disable(node->bev, EV_READ | EV_WRITE);
+
+	evbuffer_add_printf(evbuf, "%s :%u\r\n", STORE_NODE,
+			ntohs(my_addr.sin_port));
+
+	bufferevent_write_buffer(node->bev, evbuf);
+	evbuffer_free(evbuf);
+
+	connectcb(node->fd, EV_WRITE, node);
+	return 0;
+}
 
 static int store_node(const struct sockaddr_in *addr)
 {
 	struct node *node;
+	int err;
 
 	list_for_each_entry(node, &node_list, nd_entry)
 		if (!memcmp(addr, &node->addr, sizeof(struct sockaddr_in)))
@@ -107,12 +202,26 @@ static int store_node(const struct sockaddr_in *addr)
 	if (!node)
 		return -ENOMEM;
 
+again:
+	node->fd = socket(AF_INET, SOCK_STREAM, 0);
+	if (node->fd == -1) {
+		err = -errno;
+		if ((errno == ENFILE || errno == EMFILE) && trim_nodes())
+			goto again;
+		return err;
+	}
+
+	err = setup_node(node);
+	if (err)
+		return err;
+
 	node->addr = *addr;
+
 	list_add_tail(&node->nd_entry, &node_list);
 
 	printf("added node %s:%u\n", node_addr_string(node), node_port(node));
 
-	return 0;
+	return connect_node(node);
 }
 
 static void dns_resolvecb(int result, char type, int count, int ttl, 
@@ -347,14 +456,6 @@ static void store_value(const unsigned char *value, size_t size,
 	close(fd);
 }
 
-static void free_node(struct node *node)
-{
-	list_del(&node->nd_entry);
-	close(node->fd);
-	bufferevent_free(node->bev);
-	free(node);
-}
-
 static inline void request_done(const char *key_str, struct evbuffer *output)
 {
 	evbuffer_add_printf(output, "%s %s\r\n", REQUEST_DONE, key_str);
@@ -447,22 +548,11 @@ static void errorcb(struct bufferevent *bev, short what, void *arg)
 	free_node(cl);
 }
 
-static int trim_clients(void)
-{
-	struct node *cl;
-
-	if (list_empty(&client_list))
-		return 0;
-
-	cl = list_entry(client_list.prev, struct node, nd_entry);
-	free_node(cl);
-	return 1;
-}
-
 static void accept_client(int fd, short event, void *arg)
 {
 	struct node *cl;
 	socklen_t addr_len;
+	int err;
 
 	cl = malloc(sizeof(struct node));
 	if (!cl)
@@ -475,19 +565,16 @@ again:
 	if (cl->fd == -1) {
 		if (errno == EAGAIN)
 			goto again;
-		if ((errno == ENFILE || errno == EMFILE) && trim_clients())
+		if ((errno == ENFILE || errno == EMFILE) && trim_nodes())
 			goto again;
 
 		free(cl);
 		return;
 	}
 
-	cl->bev = bufferevent_new(cl->fd, readcb, NULL, errorcb, cl);
-	if (!cl->bev) {
-		close(cl->fd);
-		free(cl);
+	err = setup_node(cl);
+	if (err)
 		return;
-	}
 
 	list_add(&cl->nd_entry, &client_list);
 
@@ -642,6 +729,7 @@ int main(int argc, char **argv)
 	fprintf(stderr, "Event processing done.\n");
 	return 0;
 }
+
 
 
 

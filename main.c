@@ -100,38 +100,37 @@ static int store_node(char *addr_str)
 
 // DNS callback
 void dns_gethostbyname_cb(int result, char type, int count, int ttl, 
-                          void *addresses, void *arg)
+		void *addresses, void *arg)
 {
-  struct in_addr *addrs = addresses;
+	struct in_addr *addrs = addresses;
 	char * port = arg;
-  char addr_str[32];
-  if(result != 0) {
-    printf("Name resolution failed.\n");
-    return;
-  }
-  sprintf(addr_str, "%s:%s", inet_ntoa(addrs[0]), port);
-
-  store_node(addr_str);
+	char addr_str[32];
+	if(result != 0) {
+		printf("Name resolution failed.\n");
+		return;
+	}
+	sprintf(addr_str, "%s:%s", inet_ntoa(addrs[0]), port);
+	store_node(addr_str);
 }
 
 // Wrapper function for DNS
 static int dns_resolve(char * arg) 
 {
-  struct in_addr dummy;
-  char * port = strchr(arg, ':');
-  if(!port) return -EINVAL;
-  *port++ = 0;
-  if(inet_aton(arg, &dummy)) {
-    *(port - 1) = ':';
-    return store_node(arg);
-  }
+	struct in_addr dummy;
+	char * port = strchr(arg, ':');
+	if(!port) return -EINVAL;
+	*port++ = 0;
+	if(inet_aton(arg, &dummy)) {
+		*(port - 1) = ':';
+		return store_node(arg);
+	}
 
-  printf("Resolving %s... \n", arg);
-  if(evdns_resolve_ipv4(arg,0, dns_gethostbyname_cb, port)) {
-    printf("Failed to resolve %s.\n", arg);
-    return -EINVAL;
-  }
-  return 0;
+	printf("Resolving %s... \n", arg);
+	if(evdns_resolve_ipv4(arg,0, dns_gethostbyname_cb, port)) {
+		printf("Failed to resolve %s.\n", arg);
+		return -EINVAL;
+	}
+	return 0;
 }
 
 static int distance(const void *va, const void *vb)
@@ -457,8 +456,8 @@ static void usage(int exit_code)
 	show_opt("Usage: %s [ options ]\n", prog);
 	show_opt("--help\n");
 	show_opt("--peer <(ip|hostname):port>    connect to this peer\n");
-	show_opt("--addr <[ip:]port>  listen on specified IP and port\n");
-	show_opt("--chunk-dir <path>  path to chunk directory\n");
+	show_opt("--addr <[ip:]port>             listen on specified IP and port\n");
+	show_opt("--chunk-dir <path>             path to chunk directory\n");
 	exit(exit_code);
 }
 

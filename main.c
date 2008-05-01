@@ -59,35 +59,47 @@ static inline void *__node_digest(const struct node *node, unsigned char *digest
 
 #define node_digest(node) __node_digest(node, alloca(SHA_DIGEST_LENGTH))
 
-#define NODE_VEC_MAX	5
-
-static int store_node(char *addr_str)
+static struct sockaddr_in *__string_sockaddr_in(char *addr_str, struct sockaddr_in *sa)
 {
-	struct sockaddr_in addr;
-	struct node *node;
 	char *port;
+
+	if (!sa)
+		return NULL;
 
 	port = strchr(addr_str, ':');
 	if (!port)
-		return -EINVAL;
+		return NULL;
 
 	*port++ = 0;
 	
-	addr.sin_family = AF_INET;
-	addr.sin_port = htons(atoi(port));
+	sa->sin_family = AF_INET;
+	sa->sin_port = htons(atoi(port));
+	sa->sin_addr.s_addr = INADDR_ANY;
 
-	if (!inet_aton(addr_str, &addr.sin_addr))
-		return -EINVAL;
+	if (*addr_str && !inet_aton(addr_str, &sa->sin_addr))
+		return NULL;
+
+	return sa;
+}
+
+#define string_sockaddr_in(addr_str) \
+	__string_sockaddr_in(addr_str, alloca(sizeof(struct sockaddr_in)))
+
+#define NODE_VEC_MAX	5
+
+static int store_node(const struct sockaddr_in *addr)
+{
+	struct node *node;
 
 	list_for_each_entry(node, &node_list, nd_entry)
-		if (!memcmp(&addr, &node->addr, sizeof(struct sockaddr_in)))
+		if (!memcmp(addr, &node->addr, sizeof(struct sockaddr_in)))
 			return -EEXIST;
 
 	node = malloc(sizeof(struct node));
 	if (!node)
 		return -ENOMEM;
 
-	node->addr = addr;
+	node->addr = *addr;
 	list_add_tail(&node->nd_entry, &node_list);
 
 	printf("added node %s:%u\n", node_addr_string(node), node_port(node));
@@ -278,11 +290,14 @@ static void free_node(struct node *node)
 	free(node);
 }
 
+static inline void request_done(const char *key_str, struct evbuffer *output)
+{
+	evbuffer_add_printf(output, "%s %s\r\n", REQUEST_DONE, key_str);
+}
+
 static void proc_msg(const char *buf, size_t len, struct node *node)
 {
 	struct evbuffer *output;
-	unsigned char *value;
-	const char *key_str;
 	char *msg;
 
 	output = evbuffer_new();
@@ -296,16 +311,21 @@ static void proc_msg(const char *buf, size_t len, struct node *node)
 
 	if (!strncmp(msg, FIND_VALUE, FIND_VALUE_LEN)) {
 		msg += FIND_VALUE_LEN + 1;
+		len -= FIND_VALUE_LEN + 1;
 
 		if (!find_value(msg, output))
 			nearest_nodes(msg, output, NODE_VEC_MAX);
 
-		evbuffer_add_printf(output, "%s %s\r\n", REQUEST_DONE, msg);
+		request_done(msg, output);
 		
 	} else if (!strncmp(msg, STORE_VALUE, STORE_VALUE_LEN)) {
+		unsigned char *value;
+		const char *key_str;
+
 		msg += STORE_VALUE_LEN + 1;
+		len -= STORE_VALUE_LEN - 1;
 		
-		len = base64_size(len - STORE_VALUE_LEN - 1);
+		len = base64_size(len);
 
 		value = alloca(len);
 		if (!value)
@@ -313,11 +333,27 @@ static void proc_msg(const char *buf, size_t len, struct node *node)
 
 		len = base64_decode(msg, value, len);
 		key_str = sha1_string(value, len);
+
 		store_value(value, len, key_str);
 
 		nearest_nodes(msg, output, NODE_VEC_MAX);
 
-		evbuffer_add_printf(output, "%s %s\r\n", REQUEST_DONE, key_str);
+		request_done(key_str, output);
+
+	} else if (!strncmp(msg, STORE_NODE, STORE_NODE_LEN)) {
+		struct sockaddr_in *addr;
+
+		msg += STORE_NODE_LEN + 1;
+		len -= STORE_NODE_LEN - 1;
+
+		addr = string_sockaddr_in(msg);
+		if (!addr)
+			return;
+
+		if (addr->sin_addr.s_addr == INADDR_ANY)
+			addr->sin_addr = node->addr.sin_addr;
+
+		store_node(addr);
 	}
 
 	bufferevent_write_buffer(node->bev, output);
@@ -423,6 +459,7 @@ static void usage(int exit_code)
 
 static int proc_opt(int opt, char *arg)
 {
+	struct sockaddr_in *sa;
 	char *port;
 	int err;
 
@@ -430,12 +467,19 @@ static int proc_opt(int opt, char *arg)
 	case OPT_HELP:
 		usage(0);
 	case OPT_PEER:
-		err = store_node(arg);
-		if (err && err != -EEXIST) {
+		sa = string_sockaddr_in(arg);
+		if (!sa) {
 			fprintf(stderr, "Invalid peer.\n");
+			return -EINVAL;
+		}
+
+		err = store_node(sa);
+		if (err && err != -EEXIST) {
+			fprintf(stderr, "store peer: %s.\n", strerror(-err));
 			return err;
 		}
 		return 0;
+
 	case OPT_ADDR:
 		port = strchr(arg, ':');
 		if (!port) {

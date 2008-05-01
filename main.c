@@ -135,6 +135,7 @@ static void dns_resolvecb(int result, char type, int count, int ttl,
 
 	printf("Resolved %s to be %s\n", addr_str, inet_ntoa(*addrs));
 
+	sa.sin_family = AF_INET;
 	sa.sin_addr = *addrs;
 	sa.sin_port = htons(atoi(port));
 
@@ -163,7 +164,7 @@ static int dns_resolve(char *addr_str)
 
 	printf("Resolving %s... \n", addr_str_copy);
 
-	if(evdns_resolve_ipv4(addr_str, 0, dns_resolvecb, addr_str_copy)) {
+	if(evdns_resolve_ipv4(addr_str_copy, 0, dns_resolvecb, addr_str_copy)) {
 		printf("Failed to resolve %s.\n", addr_str_copy);
 		return -EINVAL;
 	}
@@ -641,6 +642,7 @@ int main(int argc, char **argv)
 	fprintf(stderr, "Event processing done.\n");
 	return 0;
 }
+
 
 
 

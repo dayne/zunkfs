@@ -451,7 +451,7 @@ static void usage(int exit_code)
 #define show_opt(opt...) fprintf(stderr, opt)
 	show_opt("Usage: %s [ options ]\n", prog);
 	show_opt("--help\n");
-	show_opt("--peer <ip:port>    connect to this peer\n");
+	show_opt("--peer <(ip|hostname):port>    connect to this peer\n");
 	show_opt("--addr <[ip:]port>  listen on specified IP and port\n");
 	show_opt("--chunk-dir <path>  path to chunk directory\n");
 	exit(exit_code);

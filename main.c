@@ -34,6 +34,10 @@ struct node {
 #define node_addr_string(node)	inet_ntoa(node_addr(node))
 #define node_port(node)		ntohs((node)->addr.sin_port)
 
+#define node_is_addr(node, addr) \
+	(node_addr(node).s_addr == (addr)->sin_addr.s_addr && \
+	 node_port(node) == (addr)->sin_port)
+
 #define FIND_VALUE		"find_chunk"
 #define FIND_VALUE_LEN		(sizeof(FIND_VALUE) - 1)
 #define STORE_VALUE		"store_chunk"
@@ -197,7 +201,7 @@ static int store_node(const struct sockaddr_in *addr)
 	int err;
 
 	list_for_each_entry(node, &node_list, nd_entry)
-		if (!memcmp(addr, &node->addr, sizeof(struct sockaddr_in)))
+		if (node_is_addr(node, addr))
 			return -EEXIST;
 
 	node = malloc(sizeof(struct node));

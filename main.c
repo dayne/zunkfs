@@ -110,7 +110,7 @@ static int distance(const void *va, const void *vb)
 	return -1;
 }
 
-static int nearest_nodes(const char *key_str, struct node **node_vec, int max)
+static int __nearest_nodes(const char *key_str, struct node **node_vec, int max)
 {
 	unsigned char key[SHA_DIGEST_LENGTH];
 	const char *a, *b;
@@ -148,11 +148,25 @@ static int nearest_nodes(const char *key_str, struct node **node_vec, int max)
 	return count + 1;
 }
 
-static unsigned char *find_value(const char *key_str, size_t *size)
+static void nearest_nodes(const char *key_str, struct evbuffer *output, int max)
+{
+	struct node *node_vec[max];
+	int i, count;
+
+	count = __nearest_nodes(key_str, node_vec, max);
+	for (i = 0; i < count; i ++) {
+		evbuffer_add_printf(output, "%s %s:%u\r\n",
+				STORE_NODE,
+				node_addr_string(node_vec[i]),
+				node_port(node_vec[i]));
+	}
+}
+
+static int find_value(const char *key_str, struct evbuffer *output)
 {
 	unsigned char *value;
-	struct stat st;
 	char path[PATH_MAX];
+	struct stat st;
 	ssize_t n;
 	int i, fd, len;
 
@@ -160,13 +174,13 @@ static unsigned char *find_value(const char *key_str, size_t *size)
 
 	if (strlen(key_str) != SHA_DIGEST_LENGTH * 2) {
 		fprintf(stderr, "find_value: key invalid length\n");
-		return NULL;
+		return 0;
 	}
 
 	for (i = 0; key_str[i]; i ++) {
 		if (!strchr(hex_digits, key_str[i])) {
 			fprintf(stderr, "find_value: key not in hex format\n");
-			return NULL;
+			return 0;
 		}
 	}
 
@@ -174,43 +188,44 @@ static unsigned char *find_value(const char *key_str, size_t *size)
 	len = snprintf(path, PATH_MAX, "%s/%s", value_dir, key_str);
 	if (len == PATH_MAX) {
 		fprintf(stderr, "find_value: path too long.\n");
-		return NULL;
+		return 0;
 	}
 
 	fd = open(path, O_RDONLY);
 	if (fd < 0) {
 		fprintf(stderr, "open(%s): %s\n", path, strerror(errno));
-		return NULL;
+		return 0;
 	}
 
 	if (fstat(fd, &st)) {
 		fprintf(stderr, "stat(%s): %s\n", path, strerror(errno));
 		close(fd);
-		return NULL;
+		return 0;
 	}
 
-	value = malloc(st.st_size);
+	value = alloca(st.st_size);
 	if (!value) {
 		fprintf(stderr, "find_value: %s\n", strerror(errno));
 		close(fd);
-		return NULL;
+		return 0;
 	}
 
 	fprintf(stderr, "chunk size: %zu\n", (size_t)st.st_size);
 
 	n = read(fd, value, st.st_size);
-	if (n < 0) 
+	if (n < 0) {
 		fprintf(stderr, "find_value read error: %s\n", strerror(errno));
+		close(fd);
+		return 0;
+	}
+	
+	evbuffer_add_printf(output, "%s ", STORE_VALUE);
+	base64_encode_evbuf(output, value, st.st_size);
+	evbuffer_add(output, "\r\n", 2);
 
 	close(fd);
 
-	if (n < 0) {
-		free(value);
-		return NULL;
-	}
-
-	*size = n;
-	return value;
+	return 1;
 }
 
 static const char *__sha1_string(const void *buf, size_t len, char *string)
@@ -255,7 +270,6 @@ static void store_value(const unsigned char *value, size_t size,
 	close(fd);
 }
 
-
 static void free_node(struct node *node)
 {
 	list_del(&node->nd_entry);
@@ -264,64 +278,29 @@ static void free_node(struct node *node)
 	free(node);
 }
 
-static void readcb(struct bufferevent *bev, void *arg)
+static void proc_msg(const char *buf, size_t len, struct node *node)
 {
-	struct node *cl = arg;
-	struct evbuffer *input = bev->input;
 	struct evbuffer *output;
-	const char *end;
-	const char *buf;
-	char *msg;
-	unsigned len;
 	unsigned char *value;
 	const char *key_str;
-	size_t value_size;
-	struct node *node_vec[NODE_VEC_MAX];
-	int i, node_count;
+	char *msg;
 
-	end = (const char *)evbuffer_find(input, (u_char *)"\r\n", 2);
-	if (!end)
+	output = evbuffer_new();
+	if (!output)
 		return;
 
-	buf = (const char *)EVBUFFER_DATA(input);
-	len = end - buf;
-	msg = alloca(len + 2);
-
-	if (!msg)
-		goto out;
-
+	msg = alloca(len + 1);
+	assert(msg != NULL);
 	memcpy(msg, buf, len);
 	msg[len] = 0;
-	evbuffer_drain(input, len + 2);
 
 	if (!strncmp(msg, FIND_VALUE, FIND_VALUE_LEN)) {
 		msg += FIND_VALUE_LEN + 1;
-		output = evbuffer_new();
 
-		value = find_value(msg, &value_size);
-		if (value) {
-			evbuffer_add_printf(output, "%s ", STORE_VALUE);
-			base64_encode_evbuf(output, value, value_size);
-			free(value);
-			evbuffer_add(output, "\r\n", 2);
-		} else {
-			node_count =
-				nearest_nodes(msg, node_vec, NODE_VEC_MAX);
-			if (node_count < 0)
-				goto out;
-
-			for (i = 0; i < node_count; i ++) {
-				evbuffer_add_printf(output, "%s %s:%u\r\n",
-						STORE_NODE,
-						node_addr_string(node_vec[i]),
-						node_port(node_vec[i]));
-			}
-		}
+		if (!find_value(msg, output))
+			nearest_nodes(msg, output, NODE_VEC_MAX);
 
 		evbuffer_add_printf(output, "%s %s\r\n", REQUEST_DONE, msg);
-		bufferevent_write_buffer(bev, output);
-		evbuffer_free(output);
-		return;
 		
 	} else if (!strncmp(msg, STORE_VALUE, STORE_VALUE_LEN)) {
 		msg += STORE_VALUE_LEN + 1;
@@ -330,33 +309,34 @@ static void readcb(struct bufferevent *bev, void *arg)
 
 		value = alloca(len);
 		if (!value)
-			goto out;
+			return;
 
-		output = evbuffer_new();
-		value_size = base64_decode(msg, value, len);
-		key_str = sha1_string(value, value_size);
-		store_value(value, value_size, key_str);
+		len = base64_decode(msg, value, len);
+		key_str = sha1_string(value, len);
+		store_value(value, len, key_str);
 
-		node_count = nearest_nodes(msg, node_vec, NODE_VEC_MAX);
-		if (node_count < 0)
-			goto out;
-
-		for (i = 0; i < node_count; i ++) {
-			evbuffer_add_printf(output, "%s %s:%u\r\n",
-					STORE_NODE,
-					node_addr_string(node_vec[i]),
-					node_port(node_vec[i]));
-		}
+		nearest_nodes(msg, output, NODE_VEC_MAX);
 
 		evbuffer_add_printf(output, "%s %s\r\n", REQUEST_DONE, key_str);
-		bufferevent_write_buffer(bev, output);
-		evbuffer_free(output);
-		return;
 	}
 
-out:
-	fprintf(stderr, "Killing client %p\n", cl);
-	free_node(cl);
+	bufferevent_write_buffer(node->bev, output);
+	evbuffer_free(output);
+}
+
+static void readcb(struct bufferevent *bev, void *arg)
+{
+	const char *buf, *end;
+
+	for (;;) {
+		buf = (const char *)EVBUFFER_DATA(bev->input);
+		end = (const char *)evbuffer_find(bev->input, (u_char *)"\r\n", 2);
+		if (!end)
+			return;
+
+		proc_msg(buf, end - buf, arg);
+		evbuffer_drain(bev->input, (end - buf) + 2);
+	}
 }
 
 static void errorcb(struct bufferevent *bev, short what, void *arg)

@@ -59,11 +59,16 @@ static inline void *__node_digest(const struct node *node, unsigned char *digest
 
 #define node_digest(node) __node_digest(node, alloca(SHA_DIGEST_LENGTH))
 
-static struct sockaddr_in *__string_sockaddr_in(char *addr_str, struct sockaddr_in *sa)
+static struct sockaddr_in *__string_sockaddr_in(const char *str, struct sockaddr_in *sa)
 {
+	char *addr_str;
 	char *port;
 
-	if (!sa)
+	if (!sa || !str)
+		return NULL;
+
+	addr_str = alloca(strlen(str) + 1);
+	if (!addr_str)
 		return NULL;
 
 	port = strchr(addr_str, ':');
@@ -460,7 +465,6 @@ static void usage(int exit_code)
 static int proc_opt(int opt, char *arg)
 {
 	struct sockaddr_in *sa;
-	char *port;
 	int err;
 
 	switch(opt) {
@@ -469,7 +473,7 @@ static int proc_opt(int opt, char *arg)
 	case OPT_PEER:
 		sa = string_sockaddr_in(arg);
 		if (!sa) {
-			fprintf(stderr, "Invalid peer.\n");
+			fprintf(stderr, "Invalid peer address: %s\n", arg);
 			return -EINVAL;
 		}
 
@@ -481,20 +485,15 @@ static int proc_opt(int opt, char *arg)
 		return 0;
 
 	case OPT_ADDR:
-		port = strchr(arg, ':');
-		if (!port) {
-			fprintf(stderr, "No port in address %s.\n", arg);
-			return -EINVAL;
-		}
-		*port++ = 0;
-
-		my_addr.sin_port = htons(atoi(port));
-		if (*arg && !inet_aton(arg, &my_addr.sin_addr)) {
-			fprintf(stderr, "Invalid address %s.\n", arg);
+		sa = string_sockaddr_in(arg);
+		if (!sa) {
+			fprintf(stderr, "Invalid address: %s\n", arg);
 			return -EINVAL;
 		}
 
+		my_addr = *sa;
 		return 0;
+
 	case OPT_PATH:
 		if (arg[0] != '/') {
 			fprintf(stderr, "Must supply full path to "

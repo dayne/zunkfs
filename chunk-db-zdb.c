@@ -351,9 +351,8 @@ static int send_request_to(struct request *request,
 		return -EIO;
 	}
 
-	bufferevent_disable(node->bev, EV_READ | EV_WRITE);
-
 	write_request(node, request);
+	bufferevent_disable(node->bev, EV_READ | EV_WRITE);
 
 	event_set(&node->connect_event, node->sk, EV_WRITE, try_connect, node);
 	event_base_set(request->base, &node->connect_event);

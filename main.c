@@ -21,16 +21,10 @@
 #include "base64.h"
 #include "list.h"
 
-struct client {
+struct node {
 	int fd;
 	struct bufferevent *bev;
 	struct sockaddr_in addr;
-	struct list_head cl_entry;
-};
-
-struct node {
-	struct sockaddr_in addr;
-	unsigned char id[SHA_DIGEST_LENGTH];
 	struct list_head nd_entry;
 };
 
@@ -55,6 +49,15 @@ static LIST_HEAD(client_list);
 
 static char *prog;
 static struct sockaddr_in my_addr;
+
+static inline void *__node_digest(const struct node *node, unsigned char *digest)
+{
+	assert(digest != NULL);
+	SHA1((void *)&node->addr, sizeof(struct sockaddr_in), digest);
+	return digest;
+}
+
+#define node_digest(node) __node_digest(node, alloca(SHA_DIGEST_LENGTH))
 
 #define NODE_VEC_MAX	5
 
@@ -85,8 +88,6 @@ static int store_node(char *addr_str)
 		return -ENOMEM;
 
 	node->addr = addr;
-	SHA1((void *)&node->addr, sizeof(struct sockaddr_in), node->id);
-
 	list_add_tail(&node->nd_entry, &node_list);
 
 	printf("added node %s:%u\n", node_addr_string(node), node_port(node));
@@ -132,7 +133,7 @@ static int nearest_nodes(const char *key_str, struct node **node_vec, int max)
 		node_vec[i] = NULL;
 
 	list_for_each_entry(node, &node_list, nd_entry) {
-		d = distance(key, node->id);
+		d = distance(key, node_digest(node));
 		for (i = 0; i < max; i ++) {
 			if (!node_vec[i] || d < dist_vec[i]) {
 				node_vec[i] = node;
@@ -255,17 +256,17 @@ static void store_value(const unsigned char *value, size_t size,
 }
 
 
-static void kill_client(struct client *cl)
+static void free_node(struct node *node)
 {
-	list_del(&cl->cl_entry);
-	close(cl->fd);
-	bufferevent_free(cl->bev);
-	free(cl);
+	list_del(&node->nd_entry);
+	close(node->fd);
+	bufferevent_free(node->bev);
+	free(node);
 }
 
 static void cl_read_cb(struct bufferevent *bev, void *arg)
 {
-	struct client *cl = arg;
+	struct node *cl = arg;
 	struct evbuffer *input = bev->input;
 	struct evbuffer *output;
 	const char *end;
@@ -355,34 +356,34 @@ static void cl_read_cb(struct bufferevent *bev, void *arg)
 
 out:
 	fprintf(stderr, "Killing client %p\n", cl);
-	kill_client(cl);
+	free_node(cl);
 }
 
 static void cl_error_cb(struct bufferevent *bev, short what, void *arg)
 {
-	struct client *cl = arg;
+	struct node *cl = arg;
 	printf("client disconnected: %p\n", cl);
-	kill_client(cl);
+	free_node(cl);
 }
 
 static int trim_clients(void)
 {
-	struct client *cl;
+	struct node *cl;
 
 	if (list_empty(&client_list))
 		return 0;
 
-	cl = list_entry(client_list.prev, struct client, cl_entry);
-	kill_client(cl);
+	cl = list_entry(client_list.prev, struct node, nd_entry);
+	free_node(cl);
 	return 1;
 }
 
 static void accept_client(int fd, short event, void *arg)
 {
-	struct client *cl;
+	struct node *cl;
 	socklen_t addr_len;
 
-	cl = malloc(sizeof(struct client));
+	cl = malloc(sizeof(struct node));
 	if (!cl)
 		return;
 
@@ -407,7 +408,7 @@ again:
 		return;
 	}
 
-	list_add(&cl->cl_entry, &client_list);
+	list_add(&cl->nd_entry, &client_list);
 
 	bufferevent_enable(cl->bev, EV_READ | EV_WRITE);
 

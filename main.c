@@ -70,12 +70,14 @@ static struct sockaddr_in *__string_sockaddr_in(const char *str,
 	char *addr_str;
 	char *port;
 
-	if (!sa || !str)
-		return NULL;
+	assert(sa != NULL);
+	assert(str != NULL);
 
 	addr_str = alloca(strlen(str) + 1);
 	if (!addr_str)
 		return NULL;
+
+	strcpy(addr_str, str);
 
 	port = strchr(addr_str, ':');
 	if (!port)

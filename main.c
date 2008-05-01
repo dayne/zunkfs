@@ -36,7 +36,7 @@ struct node {
 
 #define node_is_addr(node, addr) \
 	(node_addr(node).s_addr == (addr)->sin_addr.s_addr && \
-	 node_port(node) == (addr)->sin_port)
+	 node_port(node) == ntohs((addr)->sin_port))
 
 #define FIND_VALUE		"find_chunk"
 #define FIND_VALUE_LEN		(sizeof(FIND_VALUE) - 1)

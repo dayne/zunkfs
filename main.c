@@ -17,6 +17,7 @@
 #include <libgen.h>
 
 #include <event.h>
+#include <evdns.h>
 
 #include "base64.h"
 #include "list.h"
@@ -108,6 +109,48 @@ static int store_node(const struct sockaddr_in *addr)
 	list_add_tail(&node->nd_entry, &node_list);
 
 	printf("added node %s:%u\n", node_addr_string(node), node_port(node));
+
+	return 0;
+}
+
+void dns_gethostbyname_cb(int result, char type, int count, int ttl, 
+		void *addresses, void *arg)
+{
+	struct in_addr *addrs = addresses;
+	struct sockaddr_in sa;
+	char * port = arg;
+
+	if(result != 0) {
+		printf("Name resolution failed.\n");
+		return;
+	}
+
+	sa.sin_addr = *addrs;
+	sa.sin_port = htons(atoi(port));
+
+	store_node(&sa);
+}
+
+static int dns_resolve(char *arg) 
+{
+	struct sockaddr_in *addr;
+	char *port;
+
+	addr = string_sockaddr_in(arg);
+	if (addr)
+		return store_node(addr);
+       
+	port = strchr(arg, ':');
+	if(!port)
+		return -EINVAL;
+	*port++ = 0;
+
+	printf("Resolving %s... \n", arg);
+
+	if(evdns_resolve_ipv4(arg,0, dns_gethostbyname_cb, port)) {
+		printf("Failed to resolve %s.\n", arg);
+		return -EINVAL;
+	}
 
 	return 0;
 }
@@ -456,9 +499,9 @@ static void usage(int exit_code)
 #define show_opt(opt...) fprintf(stderr, opt)
 	show_opt("Usage: %s [ options ]\n", prog);
 	show_opt("--help\n");
-	show_opt("--peer <ip:port>    connect to this peer\n");
-	show_opt("--addr <[ip:]port>  listen on specified IP and port\n");
-	show_opt("--chunk-dir <path>  path to chunk directory\n");
+	show_opt("--peer <(ip|hostname):port>    connect to this peer\n");
+	show_opt("--addr <[ip:]port>             listen on specified IP and port\n");
+	show_opt("--chunk-dir <path>             path to chunk directory\n");
 	exit(exit_code);
 }
 
@@ -471,13 +514,7 @@ static int proc_opt(int opt, char *arg)
 	case OPT_HELP:
 		usage(0);
 	case OPT_PEER:
-		sa = string_sockaddr_in(arg);
-		if (!sa) {
-			fprintf(stderr, "Invalid peer address: %s\n", arg);
-			return -EINVAL;
-		}
-
-		err = store_node(sa);
+		err = dns_resolve(arg);
 		if (err && err != -EEXIST) {
 			fprintf(stderr, "store peer: %s.\n", strerror(-err));
 			return err;
@@ -536,6 +573,16 @@ int main(int argc, char **argv)
 
 	strcat(cwd, "/.chunks");
 
+	if (!event_init()) {
+		fprintf(stderr, "event_init: %s\n", strerror(errno));
+		exit(-2);
+	}
+
+	if (evdns_init()) {
+		fprintf(stderr, "evdns_init: %s\n", strerror(errno));
+		exit(-2);
+	}
+
 	while ((opt = getopt_long(argc, argv, "", opts, NULL)) != -1) {
 		err = proc_opt(opt, optarg);
 		if (err)
@@ -566,10 +613,6 @@ int main(int argc, char **argv)
 		exit(-1);
 	}
 
-	if (!event_init()) {
-		fprintf(stderr, "event_init: %s\n", strerror(errno));
-		exit(-2);
-	}
 
 	event_set(&accept_event, sk, EV_READ|EV_PERSIST, accept_client, NULL);
 	event_add(&accept_event, NULL);
@@ -582,5 +625,6 @@ int main(int argc, char **argv)
 	fprintf(stderr, "Event processing done.\n");
 	return 0;
 }
+
 
 

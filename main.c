@@ -51,7 +51,8 @@ static LIST_HEAD(client_list);
 static char *prog;
 static struct sockaddr_in my_addr;
 
-static inline void *__node_digest(const struct node *node, unsigned char *digest)
+static inline void *__node_digest(const struct node *node,
+		unsigned char *digest)
 {
 	assert(digest != NULL);
 	SHA1((void *)&node->addr, sizeof(struct sockaddr_in), digest);
@@ -60,7 +61,8 @@ static inline void *__node_digest(const struct node *node, unsigned char *digest
 
 #define node_digest(node) __node_digest(node, alloca(SHA_DIGEST_LENGTH))
 
-static struct sockaddr_in *__string_sockaddr_in(const char *str, struct sockaddr_in *sa)
+static struct sockaddr_in *__string_sockaddr_in(const char *str,
+		struct sockaddr_in *sa)
 {
 	char *addr_str;
 	char *port;
@@ -113,7 +115,7 @@ static int store_node(const struct sockaddr_in *addr)
 	return 0;
 }
 
-void dns_gethostbyname_cb(int result, char type, int count, int ttl, 
+static void dns_resolvecb(int result, char type, int count, int ttl, 
 		void *addresses, void *arg)
 {
 	struct in_addr *addrs = addresses;
@@ -147,7 +149,7 @@ static int dns_resolve(char *arg)
 
 	printf("Resolving %s... \n", arg);
 
-	if(evdns_resolve_ipv4(arg,0, dns_gethostbyname_cb, port)) {
+	if(evdns_resolve_ipv4(arg,0, dns_resolvecb, port)) {
 		printf("Failed to resolve %s.\n", arg);
 		return -EINVAL;
 	}

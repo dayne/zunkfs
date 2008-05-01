@@ -106,7 +106,8 @@ void dns_gethostbyname_cb(int result, char type, int count, int ttl,
 	char * port = arg;
   char * addr_str = calloc(32, sizeof(char));
   if(result != 0) {
-    return;
+    printf("Name resolution failed.\n");
+    exit(1);
   }
   strcpy(addr_str, inet_ntoa(addrs[0]));
   strcat(addr_str, ":");
@@ -119,9 +120,17 @@ void dns_gethostbyname_cb(int result, char type, int count, int ttl,
 // Wrapper function for DNS
 static int dns_resolve(char * arg) 
 {
+  struct in_addr dummy;
   char * port = strchr(arg, ':');
+  if(!port) return -EINVAL;
   *port++ = 0;
+  if(inet_aton(arg, &dummy)) {
+    *(port - 1) = ':';
+    return store_node(arg);
+  }
+
   evdns_init();
+  printf("Resolving %s... \n", arg);
   if(evdns_resolve_ipv4(arg,0, dns_gethostbyname_cb, port)) {
     printf("Failed.\n");
     return -EINVAL;

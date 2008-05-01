@@ -264,7 +264,7 @@ static void free_node(struct node *node)
 	free(node);
 }
 
-static void cl_read_cb(struct bufferevent *bev, void *arg)
+static void readcb(struct bufferevent *bev, void *arg)
 {
 	struct node *cl = arg;
 	struct evbuffer *input = bev->input;
@@ -359,7 +359,7 @@ out:
 	free_node(cl);
 }
 
-static void cl_error_cb(struct bufferevent *bev, short what, void *arg)
+static void errorcb(struct bufferevent *bev, short what, void *arg)
 {
 	struct node *cl = arg;
 	printf("client disconnected: %p\n", cl);
@@ -401,7 +401,7 @@ again:
 		return;
 	}
 
-	cl->bev = bufferevent_new(cl->fd, cl_read_cb, NULL, cl_error_cb, cl);
+	cl->bev = bufferevent_new(cl->fd, readcb, NULL, errorcb, cl);
 	if (!cl->bev) {
 		close(cl->fd);
 		free(cl);

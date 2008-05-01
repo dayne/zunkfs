@@ -48,13 +48,17 @@ struct node {
 	int sk;
 	struct request *request;
 	struct node *next, **pprev;
+	struct timeval stamp;
 };
 
 #define CACHE_MAX	100
 
 static struct node *node_cache = NULL;
+static struct node *dead_nodes = NULL;
 static unsigned cache_count = 0;
 static DECLARE_MUTEX(cache_mutex);
+
+static struct node dead_node;
 
 static void node_add(struct node *node, struct node **list)
 {
@@ -71,24 +75,6 @@ static void node_del(struct node *node)
 		node->next->pprev = node->pprev;
 }
 
-static struct node *find_node(const struct sockaddr_in *sa)
-{
-	struct node *node;
-
-	lock(&cache_mutex);
-	for (node = node_cache; node; node = node->next) {
-		if (sa->sin_addr.s_addr == node->addr.sin_addr.s_addr &&
-				sa->sin_port == node->addr.sin_port) {
-			cache_count --;
-			node_del(node);
-			break;
-		}
-	}
-	unlock(&cache_mutex);
-
-	return node;
-}
-
 static void free_node(struct node *node)
 {
 	node_del(node);
@@ -97,14 +83,67 @@ static void free_node(struct node *node)
 	free(node);
 }
 
+static struct node *find_node(const struct sockaddr_in *sa)
+{
+	struct node *node, *next;
+	struct timeval now;
+
+	lock(&cache_mutex);
+	for (node = node_cache; node; node = node->next) {
+		if (sa->sin_addr.s_addr == node->addr.sin_addr.s_addr &&
+				sa->sin_port == node->addr.sin_port) {
+			cache_count --;
+			node_del(node);
+			goto found;
+		}
+	}
+
+	gettimeofday(&now, NULL);
+
+	next = dead_nodes;
+	while ((node = next)) {
+		next = node->next;
+		if (timercmp(&now, &node->stamp, >)) {
+			free_node(node);
+			continue;
+		}
+
+		if (sa->sin_addr.s_addr == node->addr.sin_addr.s_addr &&
+				sa->sin_port == node->addr.sin_port) {
+			node = &dead_node;
+			goto found;
+		}
+	}
+	
+found:
+	unlock(&cache_mutex);
+
+	return node;
+}
+
 static void __cache_node(struct node *node)
 {
 	node->request = NULL;
 
-	node_del(node);
-	node_add(node, &node_cache);
-
 	bufferevent_disable(node->bev, EV_READ|EV_WRITE);
+
+	node_del(node);
+
+	/*
+	 * Nodes that didn't finish connecting before request
+	 * finished are considered dead for the next minute.
+	 */
+
+	if (event_pending(&node->connect_event, EV_WRITE, NULL)) {
+		event_del(&node->connect_event);
+		close(node->sk);
+		node_add(node, &dead_nodes);
+		gettimeofday(&node->stamp, NULL);
+		node->stamp.tv_sec += 60;
+		return;
+	}
+
+	node_add(node, &node_cache);
 
 	if (++cache_count > CACHE_MAX) {
 		for (node = node_cache; node->next; node = node->next)
@@ -251,7 +290,12 @@ again:
 	if (errno == EALREADY || errno == EINPROGRESS)
 		event_add(&node->connect_event, NULL);
 	else {
-		free_node(node);
+		/*
+		 * this is just to let cache_node() that
+		 * this is a dead node.
+		 */
+		event_add(&node->connect_event, NULL);
+		cache_node(node);
 		TRACE("connect failed\n");
 	}
 }
@@ -273,6 +317,10 @@ static int send_request_to(struct request *request,
 	int fl;
 
 	node = find_node(addr);
+	if (node == &dead_node) {
+		TRACE("dead node\n");
+		return -EINVAL;
+	}
 	if (node) {
 		write_request(node, request);
 		bufferevent_enable(node->bev, EV_READ|EV_WRITE);
@@ -373,12 +421,12 @@ static int send_request(struct evbuffer *evbuf, struct zdb_info *db_info,
 		}
 	}
 
-	timeout_del(&to_event);
-
 	lock(&cache_mutex);
 	while (request.node_list)
 		__cache_node(request.node_list);
 	unlock(&cache_mutex);
+
+	timeout_del(&to_event);
 
 	free(request.addr_list);
 

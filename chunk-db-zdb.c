@@ -23,6 +23,7 @@
 #include "utils.h"
 #include "mutex.h"
 #include "base64.h"
+#include "list.h"
 
 struct zdb_info {
 	struct sockaddr_in start_node;
@@ -36,7 +37,7 @@ struct request {
 	struct event_base *base;
 	unsigned char *chunk;
 	const unsigned char *digest;
-	struct node *node_list;
+	struct list_head node_list;
 	struct sockaddr_in *addr_list;
 	unsigned addr_count;
 	unsigned done;
@@ -48,14 +49,14 @@ struct node {
 	struct sockaddr_in addr;
 	int sk;
 	struct request *request;
-	struct node *next, **pprev;
+	struct list_head node_entry;
 	struct timeval stamp;
 };
 
 #define CACHE_MAX	100
 
-static struct node *node_cache = NULL;
-static struct node *dead_nodes = NULL;
+static LIST_HEAD(node_cache);
+static LIST_HEAD(dead_nodes);
 static unsigned cache_count = 0;
 static DECLARE_MUTEX(cache_mutex);
 
@@ -74,24 +75,9 @@ static inline int node_is_addr(const struct node *node,
 	return same_addr(&node->addr, addr);
 }
 
-static void node_add(struct node *node, struct node **list)
-{
-	node->pprev = list;
-	node->next = *list;
-	if (node->next)
-		node->next->pprev = &node->next;
-	*list = node;
-}
-
-static void node_del(struct node *node)
-{
-	if ((*node->pprev = node->next))
-		node->next->pprev = node->pprev;
-}
-
 static void free_node(struct node *node)
 {
-	node_del(node);
+	list_del(&node->node_entry);
 	bufferevent_free(node->bev);
 	close(node->sk);
 	free(node);
@@ -103,19 +89,17 @@ static struct node *find_node(const struct sockaddr_in *sa)
 	struct timeval now;
 
 	lock(&cache_mutex);
-	for (node = node_cache; node; node = node->next) {
+	list_for_each_entry(node, &node_cache, node_entry) {
 		if (node_is_addr(node, sa)) {
 			cache_count --;
-			node_del(node);
+			list_del(&node->node_entry);
 			goto found;
 		}
 	}
 
 	gettimeofday(&now, NULL);
 
-	next = dead_nodes;
-	while ((node = next)) {
-		next = node->next;
+	list_for_each_entry_safe(node, next, &dead_nodes, node_entry) {
 		if (timercmp(&now, &node->stamp, >)) {
 			free_node(node);
 			continue;
@@ -139,7 +123,7 @@ static void __cache_node(struct node *node)
 
 	bufferevent_disable(node->bev, EV_READ|EV_WRITE);
 
-	node_del(node);
+	list_del(&node->node_entry);
 
 	/*
 	 * Nodes that didn't finish connecting before request
@@ -149,18 +133,17 @@ static void __cache_node(struct node *node)
 	if (event_pending(&node->connect_event, EV_WRITE, NULL)) {
 		event_del(&node->connect_event);
 		close(node->sk);
-		node_add(node, &dead_nodes);
+		list_add(&node->node_entry, &dead_nodes);
 		gettimeofday(&node->stamp, NULL);
 		node->stamp.tv_sec += 60;
 		return;
 	}
 
-	node_add(node, &node_cache);
+	list_add(&node->node_entry, &node_cache);
 
 	if (++cache_count > CACHE_MAX) {
-		for (node = node_cache; node->next; node = node->next)
-			;
-		free_node(node);
+		free_node(list_entry(node_cache.prev, struct node, node_entry));
+		cache_count --;
 	}
 }
 
@@ -315,7 +298,7 @@ again:
 static void write_request(struct node *node, struct request *request)
 {
 	node->request = request;
-	node_add(node, &request->node_list);
+	list_add(&node->node_entry, &request->node_list);
 
 	bufferevent_base_set(request->base, node->bev);
 	bufferevent_write(node->bev, EVBUFFER_DATA(request->evbuf),
@@ -390,7 +373,7 @@ static int send_request(struct evbuffer *evbuf, struct zdb_info *db_info,
 	request.evbuf = evbuf;
 	request.chunk = chunk;
 	request.digest = digest;
-	request.node_list = NULL;
+	list_head_init(&request.node_list);
 	request.addr_list = NULL;
 	request.addr_count = 0;
 	request.done = 0;
@@ -415,7 +398,7 @@ static int send_request(struct evbuffer *evbuf, struct zdb_info *db_info,
 	for (;;) {
 		if (!timeout_pending(&to_event, &timeout))
 			break;
-		if (!request.node_list)
+		if (list_empty(&request.node_list))
 			break;
 		if (event_base_loop(request.base, EVLOOP_ONCE))
 			break;
@@ -433,8 +416,10 @@ static int send_request(struct evbuffer *evbuf, struct zdb_info *db_info,
 	}
 
 	lock(&cache_mutex);
-	while (request.node_list)
-		__cache_node(request.node_list);
+	while (!list_empty(&request.node_list)) {
+		__cache_node(list_entry(request.node_list.next, struct node,
+					node_entry));
+	}
 	unlock(&cache_mutex);
 
 	timeout_del(&to_event);

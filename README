@@ -27,7 +27,9 @@ OSX + MacPorts:
 
 [1] Unfortunately, libevent 1.4.x is not included in Ubuntu Hardy,
     CentOS 5, and others. But it is needed for zunkfs, which 
-    relies heavily on event_base_* functionality.
+    relies heavily on event_base_* functionality.  Those peeps
+    should take a look at using local_libevent_installer.sh
+    (just need to have a ~/usr or a ~/local dir as a target)
 
 II. Buildling
 ==============

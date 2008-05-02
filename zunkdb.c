@@ -351,9 +351,13 @@ static void nearest_nodes(const char *key_str, struct evbuffer *output, int max)
 	int i, count;
 
 	count = __nearest_nodes(key_str, node_vec, max);
+	printf("%d nodes near %s\n", count, key_str);
 	for (i = 0; i < count; i ++) {
 		evbuffer_add_printf(output, "%s %s:%u\r\n",
 				STORE_NODE,
+				node_addr_string(node_vec[i]),
+				node_port(node_vec[i]));
+		printf("\t%s:%u\n",
 				node_addr_string(node_vec[i]),
 				node_port(node_vec[i]));
 	}
@@ -476,6 +480,8 @@ static void proc_msg(const char *buf, size_t len, struct node *node)
 {
 	struct evbuffer *output;
 	char *msg;
+
+	printf("proc_msg: %*s\n", (int)len, buf);
 
 	output = evbuffer_new();
 	if (!output)

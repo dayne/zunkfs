@@ -1,17 +1,28 @@
+#!/bin/bash
+
+if [ ! -f  local_libevent_installer.sh ]; then
+  echo "You should be running this from the zunkfs directory so I can create the handy file needed for the Makefile"
+  exit
+fi
+
+pushd .
 cd ~
-TARGET_OPTIONS="use local"
+TARGET_OPTIONS="usr local"
+TARGET='failed'
 for I in $TARGET_OPTIONS; do
-  if [ -d $I ] ; then
+  if [ -d ./$I ] ; then
     TARGET=$I
   fi
 done
 
-if [ ! -d $TARGET ] ; then
+if [ $TARGET == 'failed' ] ; then
   echo "I couldn't find a TARGET in ~ (options considered: $TARGET_OPTIONS)"
   exit
 fi
 
+echo "using $HOME/$TARGET"
 cd $TARGET
+sleep 1
 
 if [ ! -d src ] ; then
   mkdir src
@@ -33,5 +44,9 @@ make clean
 make
 make install
 
-echo "set the following fun in your ~/.bashrc (or whatever) file (if it isn't already):"
-echo 'LD_LIBRARY_PATH='$HOME/$TARGET:'$LD_LIBRARY_PATH'
+popd
+
+echo 
+echo "-----------------------------------------"
+echo "Go and set the following environment variable somewhere (.bashrc perhaps)"
+echo "export LIBEVENT_PREFIX=$HOME/$TARGET"

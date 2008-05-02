@@ -538,7 +538,8 @@ static void readcb(struct bufferevent *bev, void *arg)
 
 	for (;;) {
 		buf = (const char *)EVBUFFER_DATA(bev->input);
-		end = (const char *)evbuffer_find(bev->input, (u_char *)"\r\n", 2);
+		end = (const char *)evbuffer_find(bev->input,
+				(u_char *)"\r\n", 2);
 		if (!end)
 			return;
 
@@ -610,7 +611,8 @@ static void usage(int exit_code)
 	show_opt("Usage: %s [ options ]\n", prog);
 	show_opt("--help\n");
 	show_opt("--peer <(ip|hostname):port>    connect to this peer\n");
-	show_opt("--addr <[ip:]port>             listen on specified IP and port\n");
+	show_opt("--addr <[ip:]port>             "
+			"listen on specified IP and port\n");
 	show_opt("--chunk-dir <path>             path to chunk directory\n");
 	exit(exit_code);
 }

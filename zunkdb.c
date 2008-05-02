@@ -536,6 +536,8 @@ static void proc_msg(const char *buf, size_t len, struct node *node)
 		if (addr->sin_addr.s_addr == INADDR_ANY)
 			addr->sin_addr = node->addr.sin_addr;
 
+		nearest_nodes(msg, output, NODE_VEC_MAX);
+
 		store_node(addr);
 	}
 

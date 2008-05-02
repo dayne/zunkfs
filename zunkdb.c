@@ -58,6 +58,26 @@ static LIST_HEAD(client_list);
 static char *prog;
 static struct sockaddr_in my_addr;
 
+static const char *__sha1_string(const void *buf, size_t len, char *string)
+{
+	char *ptr = string;
+	unsigned char digest[SHA_DIGEST_LENGTH];
+	int i;
+
+	SHA1(buf, len, digest);
+
+	for (i = 0; i < SHA_DIGEST_LENGTH; i ++) {
+		*ptr++ = hex_digits[digest[i] & 0xf];
+		*ptr++ = hex_digits[(digest[i] >> 4) & 0xf];
+	}
+	*ptr++ = 0;
+
+	return string;
+}
+
+#define sha1_string(buf, len) \
+	__sha1_string(buf, len, alloca(SHA_DIGEST_LENGTH * 2 + 1))
+
 static inline void *__node_digest(const struct node *node,
 		unsigned char *digest)
 {
@@ -179,6 +199,8 @@ static int setup_node(struct node *node)
 	return 0;
 }
 
+static void nearest_nodes(const char *, struct evbuffer *, int);
+
 static int connect_node(struct node *node)
 {
 	struct evbuffer *evbuf;
@@ -194,6 +216,10 @@ static int connect_node(struct node *node)
 
 	evbuffer_add_printf(evbuf, "%s :%u\r\n", STORE_NODE,
 			ntohs(my_addr.sin_port));
+
+
+	nearest_nodes(sha1_string(&node->addr, sizeof(struct sockaddr_in)),
+			evbuf, NODE_VEC_MAX);
 
 	bufferevent_write_buffer(node->bev, evbuf);
 	evbuffer_free(evbuf);
@@ -431,26 +457,6 @@ static int find_value(const char *key_str, struct evbuffer *output)
 	return 1;
 }
 
-static const char *__sha1_string(const void *buf, size_t len, char *string)
-{
-	char *ptr = string;
-	unsigned char digest[SHA_DIGEST_LENGTH];
-	int i;
-
-	SHA1(buf, len, digest);
-
-	for (i = 0; i < SHA_DIGEST_LENGTH; i ++) {
-		*ptr++ = hex_digits[digest[i] & 0xf];
-		*ptr++ = hex_digits[(digest[i] >> 4) & 0xf];
-	}
-	*ptr++ = 0;
-
-	return string;
-}
-
-#define sha1_string(buf, len) \
-	__sha1_string(buf, len, alloca(SHA_DIGEST_LENGTH * 2 + 1))
-
 static void store_value(const unsigned char *value, size_t size,
 		const char *key_str)
 {
@@ -537,9 +543,6 @@ static void proc_msg(const char *buf, size_t len, struct node *node)
 
 		if (addr->sin_addr.s_addr == INADDR_ANY)
 			addr->sin_addr = node->addr.sin_addr;
-
-		nearest_nodes(sha1_string(addr, sizeof(struct sockaddr_in)),
-					output, NODE_VEC_MAX);
 
 		store_node(addr);
 	}

@@ -471,7 +471,7 @@ static void store_value(const unsigned char *value, size_t size,
 		return;
 	}
 
-	fd = open(path, O_WRONLY|O_EXCL|O_CREAT);
+	fd = open(path, O_WRONLY|O_EXCL|O_CREAT, 0644);
 	if (fd < 0) {
 		fprintf(stderr, "store_value(%s): %s\n", path, strerror(errno));
 		return;

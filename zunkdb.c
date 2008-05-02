@@ -463,6 +463,8 @@ static void store_value(const unsigned char *value, size_t size,
 	char path[PATH_MAX];
 	int fd, len;
 
+	printf("store_value(%s)\n", key_str);
+
 	len = snprintf(path, PATH_MAX, "%s/%s", value_dir, key_str);
 	if (len == PATH_MAX) {
 		fprintf(stderr, "store_value: path too long\n");
@@ -488,8 +490,6 @@ static void proc_msg(const char *buf, size_t len, struct node *node)
 {
 	struct evbuffer *output;
 	char *msg;
-
-	printf("proc_msg: %*s\n", (int)len, buf);
 
 	output = evbuffer_new();
 	if (!output)
@@ -527,7 +527,7 @@ static void proc_msg(const char *buf, size_t len, struct node *node)
 
 		store_value(value, len, key_str);
 
-		nearest_nodes(msg, output, NODE_VEC_MAX);
+		nearest_nodes(key_str, output, NODE_VEC_MAX);
 
 		request_done(key_str, output);
 

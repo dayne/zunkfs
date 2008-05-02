@@ -77,6 +77,8 @@ static struct sockaddr_in *__string_sockaddr_in(const char *str,
 	assert(sa != NULL);
 	assert(str != NULL);
 
+	memset(sa, 0, sizeof(struct sockaddr_in));
+
 	addr_str = alloca(strlen(str) + 1);
 	if (!addr_str)
 		return NULL;
@@ -536,7 +538,8 @@ static void proc_msg(const char *buf, size_t len, struct node *node)
 		if (addr->sin_addr.s_addr == INADDR_ANY)
 			addr->sin_addr = node->addr.sin_addr;
 
-		nearest_nodes(msg, output, NODE_VEC_MAX);
+		nearest_nodes(sha1_string(addr, sizeof(struct sockaddr_in)),
+					output, NODE_VEC_MAX);
 
 		store_node(addr);
 	}

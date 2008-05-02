@@ -160,6 +160,8 @@ static void errorcb(struct bufferevent *bev, short what, void *arg);
 
 static int setup_node(struct node *node)
 {
+	int fl;
+
 	event_set(&node->connect_event, node->fd, EV_WRITE, connectcb, node);
 
 	node->bev = bufferevent_new(node->fd, readcb, NULL, errorcb, node);
@@ -168,6 +170,9 @@ static int setup_node(struct node *node)
 		free(node);
 		return -ENOMEM;
 	}
+
+	fl = fcntl(node->fd, F_GETFL);
+	fcntl(node->fd, F_SETFL, fl | O_NONBLOCK);
 
 	return 0;
 }

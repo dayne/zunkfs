@@ -413,7 +413,6 @@ static int find_value(const char *key_str, struct evbuffer *output)
 		}
 	}
 
-
 	len = snprintf(path, PATH_MAX, "%s/%s", value_dir, key_str);
 	if (len == PATH_MAX) {
 		fprintf(stderr, "find_value: path too long.\n");
@@ -422,19 +421,19 @@ static int find_value(const char *key_str, struct evbuffer *output)
 
 	fd = open(path, O_RDONLY);
 	if (fd < 0) {
-		fprintf(stderr, "open(%s): %s\n", path, strerror(errno));
+		fprintf(stderr, "\topen: %s\n", strerror(errno));
 		return 0;
 	}
 
 	if (fstat(fd, &st)) {
-		fprintf(stderr, "stat(%s): %s\n", path, strerror(errno));
+		fprintf(stderr, "\tstat: %s\n", strerror(errno));
 		close(fd);
 		return 0;
 	}
 
 	value = alloca(st.st_size);
 	if (!value) {
-		fprintf(stderr, "find_value: %s\n", strerror(errno));
+		fprintf(stderr, "\t%s\n", strerror(errno));
 		close(fd);
 		return 0;
 	}
@@ -443,7 +442,7 @@ static int find_value(const char *key_str, struct evbuffer *output)
 
 	n = read(fd, value, st.st_size);
 	if (n < 0) {
-		fprintf(stderr, "find_value read error: %s\n", strerror(errno));
+		fprintf(stderr, "\tread: %s\n", strerror(errno));
 		close(fd);
 		return 0;
 	}
@@ -473,11 +472,13 @@ static void store_value(const unsigned char *value, size_t size,
 
 	fd = open(path, O_WRONLY|O_EXCL|O_CREAT, 0644);
 	if (fd < 0) {
-		fprintf(stderr, "store_value(%s): %s\n", path, strerror(errno));
+		fprintf(stderr, "\t%s\n", strerror(errno));
 		return;
 	}
 
-	write(fd, value, size);
+	if (write(fd, value, size) < 0)
+		fprintf(stderr, "\t%s\n", strerror(errno));
+
 	close(fd);
 }
 

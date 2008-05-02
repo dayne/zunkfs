@@ -61,6 +61,19 @@ static DECLARE_MUTEX(cache_mutex);
 
 static struct node dead_node;
 
+static inline int same_addr(const struct sockaddr_in *a,
+		const struct sockaddr_in *b)
+{
+	return a->sin_addr.s_addr == b->sin_addr.s_addr &&
+		a->sin_port == b->sin_port;
+}
+
+static inline int node_is_addr(const struct node *node, 
+		const struct sockaddr_in *addr)
+{
+	return same_addr(&node->addr, addr);
+}
+
 static void node_add(struct node *node, struct node **list)
 {
 	node->pprev = list;
@@ -91,8 +104,7 @@ static struct node *find_node(const struct sockaddr_in *sa)
 
 	lock(&cache_mutex);
 	for (node = node_cache; node; node = node->next) {
-		if (sa->sin_addr.s_addr == node->addr.sin_addr.s_addr &&
-				sa->sin_port == node->addr.sin_port) {
+		if (node_is_addr(node, sa)) {
 			cache_count --;
 			node_del(node);
 			goto found;
@@ -109,8 +121,7 @@ static struct node *find_node(const struct sockaddr_in *sa)
 			continue;
 		}
 
-		if (sa->sin_addr.s_addr == node->addr.sin_addr.s_addr &&
-				sa->sin_port == node->addr.sin_port) {
+		if (node_is_addr(node, sa)) {
 			node = &dead_node;
 			goto found;
 		}
@@ -184,7 +195,7 @@ static void store_node(struct request *request, char *addr_str)
 
 	for (i = 0; i < request->addr_count; i ++) {
 		uaddr = &request->addr_list[i];
-		if (!memcmp(&addr, uaddr, sizeof(struct sockaddr_in)))
+		if (same_addr(&addr, uaddr))
 			return;
 	}
 

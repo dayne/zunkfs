@@ -1,7 +1,8 @@
 FUSE_CFLAGS=$(shell pkg-config fuse --cflags)
 FUSE_LIBS=$(shell pkg-config fuse --libs) 
-LDFLAGS=-lssl -lsqlite3 $(FUSE_LIBS) -levent
-CFLAGS=-g -Wall $(FUSE_CFLAGS) -DZUNKFS_OS=$(OS)
+LIBEVENT_PREFIX=.
+LDFLAGS=-lssl -lsqlite3 $(FUSE_LIBS) -L$(LIBEVENT_PREFIX)/lib -levent
+CFLAGS=-g -Wall $(FUSE_CFLAGS) -DZUNKFS_OS=$(OS) -I$(LIBEVENT_PREFIX)/include
 OS=$(shell /usr/bin/env uname)
 
 ifdef CHUNK_SIZE

@@ -1,5 +1,9 @@
-CFLAGS=-Wall -g
-LDFLAGS=-levent -lcrypto -lssl
+ifndef LIBEVENT_PREFIX
+LIBEVENT_PREFIX=.
+endif
+
+CFLAGS=-Wall -g -I$(LIBEVENT_PREFIX)/include
+LDFLAGS=-L$(LIBEVENT_PREFIX)/lib -levent -lcrypto -lssl
 
 TARGETS=zunkdb test-client base64-test
 

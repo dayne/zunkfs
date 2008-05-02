@@ -1,27 +1,49 @@
 #!/bin/bash
+#
+# a simple script that will install libevent into some PREFIX you specify
+# script looks for a ~/usr and ~/local if you don't specify anything
+#
+
+LEFILE=libevent-1.4.3-stable.tar.gz
+LEDIR=libevent-1.4.3-stable
 
 if [ ! -f  local_libevent_installer.sh ]; then
   echo "You should be running this from the zunkfs directory so I can create the handy file needed for the Makefile"
   exit
 fi
 
-pushd .
-cd ~
-TARGET_OPTIONS="usr local"
-TARGET='failed'
-for I in $TARGET_OPTIONS; do
-  if [ -d ./$I ] ; then
-    TARGET=$I
-  fi
-done
+if [ -z $PREFIX ]; then
+  cd $HOME
+  TARGET_OPTIONS="usr local"
 
-if [ $TARGET == 'failed' ] ; then
-  echo "I couldn't find a TARGET in ~ (options considered: $TARGET_OPTIONS)"
-  exit
+  for I in $TARGET_OPTIONS; do
+    if [ -d ./$I ] ; then
+      TARGET=$I
+    fi
+  done
+
+  if [ -z $TARGET ] ; then
+    echo "I couldn't find a TARGET in ~ (options considered: $TARGET_OPTIONS)"
+    exit
+  fi
+  PREFIX=$HOME/$TARGET
 fi
 
-echo "using $HOME/$TARGET"
-cd $TARGET
+if [ ! -d $PREFIX ]; then
+  echo "$PREFIX does not exist.  How sad.  I can't continue without some sort of target"
+  echo "Try running me like: "
+  echo "  mkdir ~/usr"
+  echo "  PREFIX=~/usr ./local_libevent_installer.sh"
+fi
+
+echo "I am about to install $LEFILE using PREFIX=$PREFIX"
+read -p "Continue (y/n)?"
+if [ $REPLY != "y" ]; then
+  echo "Exiting..."
+  exit 1
+fi
+
+cd $PREFIX
 sleep 1
 
 if [ ! -d src ] ; then
@@ -30,23 +52,23 @@ fi
 
 cd src
 
-if [ ! -f libevent-1.4.3-stable.tar.gz ] ; then
-  wget --quiet http://monkey.org/~provos/libevent-1.4.3-stable.tar.gz
+if [ ! -f $LEFILE ] ; then
+  echo "Starting download of $LEFILE"
+  wget --quiet http://monkey.org/~provos/$LEFILE
+  echo "download done"
 fi
 
-if [ ! -d libevent-1.4.3-stable/ ] ; then
-  tar xvfz libevent-1.4.3-stable.tar.gz
+if [ ! -d $LEDIR ] ; then
+  tar xvfz $LEFILE
 fi
 
-cd libevent-1.4.3-stable/
+cd $LEDIR
+./configure --prefix=$PREFIX/
 make clean
-./configure --prefix=$HOME/$TARGET/
 make
 make install
-
-popd
 
 echo 
 echo "-----------------------------------------"
 echo "Go and set the following environment variable somewhere (.bashrc perhaps)"
-echo "export LIBEVENT_PREFIX=$HOME/$TARGET"
+echo "export LIBEVENT_PREFIX=$PREFIX"

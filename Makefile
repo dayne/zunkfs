@@ -44,11 +44,12 @@ FINAL_OBJS=zunkfs \
 	   dir-unit-test \
 	   file-unit-test \
 	   zunkfs-list-ddents \
-	   zunkfs-add-ddent
+	   zunkfs-add-ddent \
+	   zunkdb
 
 all: ${FINAL_OBJS}
 
-tests: ctree-unit-test dir-unit-test file-unit-test
+tests: ctree-unit-test dir-unit-test file-unit-test base64-test test-client
 
 zunkfs: $(CORE_OBJS) $(DBTYPES) fuse.o
 	$(CC) -o $@ $^ $(LDFLAGS)
@@ -66,6 +67,15 @@ zunkfs-list-ddents: $(CORE_OBJS) $(DBTYPES) zunkfs-list-ddents.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 zunkfs-add-ddent: $(CORE_OBJS) $(DBTYPES) zunkfs-add-ddent.o 
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+zunkdb: zunkdb.o base64.o
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+test-client: client.o base64.o
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+base64-test: base64-test.o base64.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 clean:

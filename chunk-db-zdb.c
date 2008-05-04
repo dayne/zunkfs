@@ -28,6 +28,7 @@
 struct zdb_info {
 	struct sockaddr_in start_node;
 	struct timeval timeout;
+	unsigned max_concurrency;
 };
 
 struct node;
@@ -40,6 +41,8 @@ struct request {
 	struct list_head node_list;
 	struct sockaddr_in *addr_list;
 	unsigned addr_count;
+	unsigned addr_index;
+	unsigned addr_concurrency;
 	unsigned done;
 };
 
@@ -77,6 +80,8 @@ static inline int node_is_addr(const struct node *node,
 
 static void free_node(struct node *node)
 {
+	if (node->request)
+		node->request->addr_concurrency --;
 	list_del(&node->node_entry);
 	bufferevent_free(node->bev);
 	close(node->sk);
@@ -155,15 +160,31 @@ static void cache_node(struct node *node)
 	unlock(&cache_mutex);
 }
 
-static int send_request_to(struct request *request,
-		const struct sockaddr_in *addr);
+static void __store_node(struct request *request, struct sockaddr_in *addr)
+{
+	struct sockaddr_in *uaddr;
+	int i;
+
+	for (i = 0; i < request->addr_count; i ++) {
+		uaddr = &request->addr_list[i];
+		if (same_addr(addr, uaddr))
+			return;
+	}
+
+	uaddr = realloc(request->addr_list,
+			sizeof(struct sockaddr_in) * (i + 1));
+	if (!uaddr)
+		return;
+
+	uaddr[i] = *addr;
+	request->addr_list = uaddr;
+	request->addr_count ++;
+}
 
 static void store_node(struct request *request, char *addr_str)
 {
-	char *port;
 	struct sockaddr_in addr;
-	struct sockaddr_in *uaddr;
-	int i;
+	char *port;
 
 	port = strchr(addr_str, ':');
 	if (!port)
@@ -177,22 +198,7 @@ static void store_node(struct request *request, char *addr_str)
 	if (!inet_aton(addr_str, &addr.sin_addr))
 		return;
 
-	for (i = 0; i < request->addr_count; i ++) {
-		uaddr = &request->addr_list[i];
-		if (same_addr(&addr, uaddr))
-			return;
-	}
-
-	uaddr = realloc(request->addr_list,
-			sizeof(struct sockaddr_in) * (i + 1));
-	if (!uaddr)
-		return;
-
-	uaddr[i] = addr;
-	request->addr_list = uaddr;
-	request->addr_count ++;
-
-	send_request_to(request, &addr);
+	__store_node(request, &addr);
 }
 
 #define FIND_CHUNK		"find_chunk"
@@ -225,6 +231,7 @@ static int proc_msg(const char *buf, size_t len, struct node *node)
 		msg += REQUEST_DONE_LEN + 1;
 		if (!strcmp(msg, digest_string(req->digest))) {
 			req->done ++;
+			req->addr_concurrency --;
 			cache_node(node);
 			return 1;
 		}
@@ -298,6 +305,11 @@ again:
 
 static void write_request(struct node *node, struct request *request)
 {
+	TRACE("write_request node=%s:%u request=%p\n",
+			inet_ntoa(node->addr.sin_addr),
+			ntohs(node->addr.sin_port),
+			request);
+
 	node->request = request;
 	list_add(&node->node_entry, &request->node_list);
 
@@ -377,6 +389,8 @@ static int send_request(struct evbuffer *evbuf, struct zdb_info *db_info,
 	list_head_init(&request.node_list);
 	request.addr_list = NULL;
 	request.addr_count = 0;
+	request.addr_index = 0;
+	request.addr_concurrency = 0;
 	request.done = 0;
 
 	request.base = event_base_new();
@@ -385,11 +399,7 @@ static int send_request(struct evbuffer *evbuf, struct zdb_info *db_info,
 		return -EIO;
 	}
 
-	err = send_request_to(&request, &db_info->start_node);
-	if (err) {
-		event_base_free(request.base);
-		return err;
-	}
+	__store_node(&request, &db_info->start_node);
 
 	timeout_set(&to_event, timeout_cb, &request);
 	event_base_set(request.base, &to_event);
@@ -397,8 +407,19 @@ static int send_request(struct evbuffer *evbuf, struct zdb_info *db_info,
 
 	err = -EIO;
 	for (;;) {
-		if (!timeout_pending(&to_event, &timeout))
+		while (request.addr_index != request.addr_count) {
+			if (request.addr_concurrency >=
+					db_info->max_concurrency)
+				break;
+			send_request_to(&request,
+					&request.addr_list[request.addr_index]);
+			request.addr_index ++;
+			request.addr_concurrency ++;
+		}
+		if (!timeout_pending(&to_event, &timeout)) {
+			err = -ETIMEDOUT;
 			break;
+		}
 		if (list_empty(&request.node_list))
 			break;
 		if (event_base_loop(request.base, EVLOOP_ONCE))
@@ -509,6 +530,13 @@ static int parse_spec(const char *spec, struct zdb_info *zdb_info)
 
 		} else if (!strncmp(opt, "timeout=", 8)) {
 			zdb_info->timeout.tv_sec = atoi(opt + 8);
+			if (!zdb_info->timeout.tv_sec)
+				return -EINVAL;
+
+		} else if (!strncmp(opt, "concurrency=", 12)) {
+			zdb_info->max_concurrency = atoi(opt + 12);
+			if (!zdb_info->max_concurrency)
+				return -EINVAL;
 
 		} else {
 			ERROR("Unknown option: %s\n", opt);
@@ -544,6 +572,8 @@ static struct chunk_db *zdb_chunkdb_ctor(int mode, const char *spec)
 
 	zdb_info->timeout.tv_sec = 60;
 	zdb_info->timeout.tv_usec = 0;
+
+	zdb_info->max_concurrency = -1;
 
 	cdb->read_chunk = zdb_read_chunk;
 	cdb->write_chunk = (mode == CHUNKDB_RW) ? zdb_write_chunk : NULL;

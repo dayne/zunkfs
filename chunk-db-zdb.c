@@ -476,67 +476,84 @@ static int zdb_write_chunk(const unsigned char *chunk,
 	return send_request(request, db_info, digest, NULL);
 }
 
+static int parse_spec(const char *spec, struct zdb_info *zdb_info)
+{
+	char *addr, *port;
+	char *spec_copy;
+	char *opt;
+	int opt_count;
+
+	spec_copy = alloca(strlen(spec + 1));
+	if (!spec_copy)
+		return -ENOMEM;
+
+	strcpy(spec_copy, spec);
+
+	addr = NULL;
+
+	for (opt_count = 0; (opt = strsep(&spec_copy, ",")); opt_count ++) {
+		if (!opt_count) {
+			addr = opt;
+			port = strchr(addr, ':');
+			if (!port) {
+				ERROR("No port\n");
+				return -EINVAL;
+			}
+			*port++ = 0;
+
+			zdb_info->start_node.sin_family = AF_INET;
+			zdb_info->start_node.sin_port = htons(atoi(port));
+
+			if (!inet_aton(addr, &zdb_info->start_node.sin_addr))
+				return -EINVAL;
+
+		} else if (!strncmp(opt, "timeout=", 8)) {
+			zdb_info->timeout.tv_sec = atoi(opt + 8);
+
+		} else {
+			ERROR("Unknown option: %s\n", opt);
+			return -EINVAL;
+		}
+	}
+
+	if (!addr) {
+		ERROR("No address.\n");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 static struct chunk_db *zdb_chunkdb_ctor(int mode, const char *spec)
 {
 	struct chunk_db *cdb;
 	struct zdb_info *zdb_info;
-	char *port;
-	char *addr;
-	char *timeout;
+	int err;
 
 	if (strncmp(spec, "zunkdb:", 7))
 		return NULL;
 
 	spec += 7;
-	addr = alloca(strlen(spec) + 1);
-	if (!addr)
-		return ERR_PTR(ENOMEM);
-
-	strcpy(addr, spec);
-
-	port = strchr(addr, ':');
-	if (!port) {
-		fprintf(stderr, "Spec missing node port #.\n");
-		return ERR_PTR(EINVAL);
-	}
-
-	*port++ = 0;
-
-	/*
-	 * FIXME: should try to parse options
-	 */
-	timeout = strchr(port, ',');
-	if (timeout)
-		*timeout++ = 0;
 
 	cdb = malloc(sizeof(struct chunk_db) + sizeof(struct zdb_info));
 	if (!cdb)
 		return ERR_PTR(ENOMEM);
 
-	zdb_info = cdb->db_info = (void *)(cdb + 1);
+	zdb_info = (void *)(cdb + 1);
+	cdb->db_info = zdb_info;
 
-	if (!inet_aton(addr, &zdb_info->start_node.sin_addr)) {
-		fprintf(stderr, "Invalid node address: %s\n", addr);
-		free(cdb);
-		return ERR_PTR(EINVAL);
-	}
-
-	/*
-	 * default timeout is 60 seconds
-	 */
 	zdb_info->timeout.tv_sec = 60;
 	zdb_info->timeout.tv_usec = 0;
-
-	if (timeout)
-		zdb_info->timeout.tv_sec = atoi(timeout);
-
-	zdb_info->start_node.sin_port = ntohs(atoi(port));
-	zdb_info->start_node.sin_family = AF_INET;
 
 	cdb->read_chunk = zdb_read_chunk;
 	cdb->write_chunk = (mode == CHUNKDB_RW) ? zdb_write_chunk : NULL;
 
-	return cdb;
+	err = parse_spec(spec, zdb_info);
+	if (!err)
+		return cdb;
+
+	free(cdb);
+	return ERR_PTR(err);
 }
 
 static void __attribute__((constructor)) init_chunkdb_zdb(void)

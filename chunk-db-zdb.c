@@ -111,6 +111,7 @@ static struct node *find_node(const struct sockaddr_in *sa)
 		}
 	}
 	
+	node = NULL;
 found:
 	unlock(&cache_mutex);
 

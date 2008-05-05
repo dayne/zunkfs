@@ -111,6 +111,7 @@ found:
 	if (!chunkdb_list)
 		panic("Failed to resize list of chunk databases.\n");
 
+	cdb->mode = mode;
 	chunkdb_list[n] = cdb;
 
 	return 0;
@@ -145,21 +146,25 @@ cache_chunk:
 int write_chunk(const unsigned char *chunk, unsigned char *digest)
 {
 	struct chunk_db *cdb;
-	int i, err;
+	int i, n, ret;
 
 	digest_chunk(chunk, digest);
 
 	TRACE("digest=%s\n", digest_string(digest));
 
+	ret = -EIO;
 	for (i = 0; i < chunkdb_count; i ++) {
 		cdb = chunkdb_list[i];
 		if (cdb->write_chunk) {
-			err = cdb->write_chunk(chunk, digest, cdb->db_info);
-			if (err > 0)
-				return err;
+			n = cdb->write_chunk(chunk, digest, cdb->db_info);
+			if (n > ret)
+				ret = n;
+			if (ret > 0 && (cdb->mode & CHUNKDB_WT) == 0)
+				return ret;
 		}
 	}
 
-	return -EIO;
+	return ret;
 }
+
 

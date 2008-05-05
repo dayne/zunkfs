@@ -2,7 +2,7 @@ FUSE_CFLAGS=$(shell pkg-config fuse --cflags)
 FUSE_LIBS=$(shell pkg-config fuse --libs) 
 
 ifndef LIBEVENT_PREFIX
-  LIBEVENT_PREFIX=.
+LIBEVENT_PREFIX=.
 endif
 
 LDFLAGS=-lssl -lsqlite3 $(FUSE_LIBS) -L$(LIBEVENT_PREFIX)/lib -levent

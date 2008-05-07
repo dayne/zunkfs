@@ -611,13 +611,21 @@ again:
 }
 
 enum {
+	OPT_HELP = 'h',
+	OPT_PEER = 'p',
+	OPT_ADDR = 'a',
+	OPT_PATH = 'c',
+};
+
+static const char short_opts[] = {
 	OPT_HELP,
 	OPT_PEER,
 	OPT_ADDR,
 	OPT_PATH,
+	0
 };
 
-static struct option opts[] = {
+static const struct option long_opts[] = {
 	{ "help", no_argument, NULL, OPT_HELP },
 	{ "peer", required_argument, NULL, OPT_PEER },
 	{ "addr", required_argument, NULL, OPT_ADDR },
@@ -625,15 +633,16 @@ static struct option opts[] = {
 	{ NULL }
 };
 
+#define USAGE \
+"-h|--help\n"\
+"-p|--peer <(ip|hostname):port>    Connect to this peer.\n"\
+"-a|--addr <[ip:]port>             Listen on specified IP and port.\n"\
+"-c|--chunk-dir <path>             Path to chunk directory.\n"
+
 static void usage(int exit_code)
 {
-#define show_opt(opt...) fprintf(stderr, opt)
-	show_opt("Usage: %s [ options ]\n", prog);
-	show_opt("--help\n");
-	show_opt("--peer <(ip|hostname):port>    connect to this peer\n");
-	show_opt("--addr <[ip:]port>             "
-			"listen on specified IP and port\n");
-	show_opt("--chunk-dir <path>             path to chunk directory\n");
+	fprintf(stderr, "Usage: %s [ options ]\n", prog);
+	fprintf(stderr, "%s\n", USAGE);
 	exit(exit_code);
 }
 
@@ -715,7 +724,8 @@ int main(int argc, char **argv)
 		exit(-2);
 	}
 
-	while ((opt = getopt_long(argc, argv, "", opts, NULL)) != -1) {
+	while ((opt = getopt_long(argc, argv, short_opts, long_opts, NULL))
+			!= -1) {
 		err = proc_opt(opt, optarg);
 		if (err)
 			usage(err);
@@ -757,6 +767,7 @@ int main(int argc, char **argv)
 	fprintf(stderr, "Event processing done.\n");
 	return 0;
 }
+
 
 
 

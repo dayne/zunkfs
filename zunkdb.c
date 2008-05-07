@@ -48,6 +48,8 @@ struct node {
 #define STORE_NODE_LEN		(sizeof(STORE_NODE) - 1)
 
 #define NODE_VEC_MAX	5
+#define SHA_DIGEST_BITS	(8 * SHA_DIGEST_LENGTH)
+#define SHA_DIGEST_INTS	(SHA_DIGEST_LENGTH / sizeof(int))
 
 static char *value_dir = NULL;
 static const char hex_digits[] = "0123456789abcdef";
@@ -326,10 +328,10 @@ static int distance(const void *va, const void *vb)
 	const unsigned *b = vb;
 	int i;
 
-	for (i = 0; i < 5; i ++) {
+	for (i = 0; i < SHA_DIGEST_INTS; i ++) {
 		unsigned bit = ffs(a[i] ^ b[i]);
 		if (bit)
-			return 160 - (bit + i * 32);
+			return SHA_DIGEST_BITS - (bit + i * 32);
 	}
 
 	return -1;

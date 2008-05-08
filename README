@@ -57,7 +57,7 @@ IV. Chunk storage
 Zunkfs supports multiple back-ends for chunk storage (aka, chunk-db.)
 Chunk-dbs are specified as:
 
-	--chunk-db=<rw|ro>,<method:info>
+	--chunk-db=<rw|ro>,[wt,]<method:info>
 
 More thank one chunk-db may be specified at the command line. As chunks
 are needed, the dbs will be processed in order. Once a chunk is found,
@@ -68,6 +68,12 @@ it is written into all preceeding, writable, chunk-dbs. For examlpe:
 will first try to find a chunk in a local directory $PWD/.chunks. If that
 fails it'll try to launch fetch.sh to get the chunk. If fetch.sh gets
 the chunk, the chunk will be written to $PWD/.chunks.
+
+Writable DBs stop writing as soon as one succeeds, unless it is marked
+as write-through (wt). 
+
+ChunkDB backends
+----------------
 
 * cmd:/path/to/command
 	This will launch command with one argument -- a hex representation

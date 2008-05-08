@@ -58,6 +58,26 @@ static LIST_HEAD(client_list);
 static char *prog;
 static struct sockaddr_in my_addr;
 
+static const char *__sha1_string(const void *buf, size_t len, char *string)
+{
+	char *ptr = string;
+	unsigned char digest[SHA_DIGEST_LENGTH];
+	int i;
+
+	SHA1(buf, len, digest);
+
+	for (i = 0; i < SHA_DIGEST_LENGTH; i ++) {
+		*ptr++ = hex_digits[digest[i] & 0xf];
+		*ptr++ = hex_digits[(digest[i] >> 4) & 0xf];
+	}
+	*ptr++ = 0;
+
+	return string;
+}
+
+#define sha1_string(buf, len) \
+	__sha1_string(buf, len, alloca(SHA_DIGEST_LENGTH * 2 + 1))
+
 static inline void *__node_digest(const struct node *node,
 		unsigned char *digest)
 {
@@ -76,6 +96,8 @@ static struct sockaddr_in *__string_sockaddr_in(const char *str,
 
 	assert(sa != NULL);
 	assert(str != NULL);
+
+	memset(sa, 0, sizeof(struct sockaddr_in));
 
 	addr_str = alloca(strlen(str) + 1);
 	if (!addr_str)
@@ -160,6 +182,8 @@ static void errorcb(struct bufferevent *bev, short what, void *arg);
 
 static int setup_node(struct node *node)
 {
+	int fl;
+
 	event_set(&node->connect_event, node->fd, EV_WRITE, connectcb, node);
 
 	node->bev = bufferevent_new(node->fd, readcb, NULL, errorcb, node);
@@ -169,8 +193,13 @@ static int setup_node(struct node *node)
 		return -ENOMEM;
 	}
 
+	fl = fcntl(node->fd, F_GETFL);
+	fcntl(node->fd, F_SETFL, fl | O_NONBLOCK);
+
 	return 0;
 }
+
+static void nearest_nodes(const char *, struct evbuffer *, int);
 
 static int connect_node(struct node *node)
 {
@@ -187,6 +216,10 @@ static int connect_node(struct node *node)
 
 	evbuffer_add_printf(evbuf, "%s :%u\r\n", STORE_NODE,
 			ntohs(my_addr.sin_port));
+
+
+	nearest_nodes(sha1_string(&node->addr, sizeof(struct sockaddr_in)),
+			evbuf, NODE_VEC_MAX);
 
 	bufferevent_write_buffer(node->bev, evbuf);
 	evbuffer_free(evbuf);
@@ -346,9 +379,13 @@ static void nearest_nodes(const char *key_str, struct evbuffer *output, int max)
 	int i, count;
 
 	count = __nearest_nodes(key_str, node_vec, max);
+	printf("%d nodes near %s\n", count, key_str);
 	for (i = 0; i < count; i ++) {
 		evbuffer_add_printf(output, "%s %s:%u\r\n",
 				STORE_NODE,
+				node_addr_string(node_vec[i]),
+				node_port(node_vec[i]));
+		printf("\t%s:%u\n",
 				node_addr_string(node_vec[i]),
 				node_port(node_vec[i]));
 	}
@@ -376,7 +413,6 @@ static int find_value(const char *key_str, struct evbuffer *output)
 		}
 	}
 
-
 	len = snprintf(path, PATH_MAX, "%s/%s", value_dir, key_str);
 	if (len == PATH_MAX) {
 		fprintf(stderr, "find_value: path too long.\n");
@@ -385,19 +421,19 @@ static int find_value(const char *key_str, struct evbuffer *output)
 
 	fd = open(path, O_RDONLY);
 	if (fd < 0) {
-		fprintf(stderr, "open(%s): %s\n", path, strerror(errno));
+		fprintf(stderr, "\topen: %s\n", strerror(errno));
 		return 0;
 	}
 
 	if (fstat(fd, &st)) {
-		fprintf(stderr, "stat(%s): %s\n", path, strerror(errno));
+		fprintf(stderr, "\tstat: %s\n", strerror(errno));
 		close(fd);
 		return 0;
 	}
 
 	value = alloca(st.st_size);
 	if (!value) {
-		fprintf(stderr, "find_value: %s\n", strerror(errno));
+		fprintf(stderr, "\t%s\n", strerror(errno));
 		close(fd);
 		return 0;
 	}
@@ -406,7 +442,7 @@ static int find_value(const char *key_str, struct evbuffer *output)
 
 	n = read(fd, value, st.st_size);
 	if (n < 0) {
-		fprintf(stderr, "find_value read error: %s\n", strerror(errno));
+		fprintf(stderr, "\tread: %s\n", strerror(errno));
 		close(fd);
 		return 0;
 	}
@@ -420,31 +456,13 @@ static int find_value(const char *key_str, struct evbuffer *output)
 	return 1;
 }
 
-static const char *__sha1_string(const void *buf, size_t len, char *string)
-{
-	char *ptr = string;
-	unsigned char digest[SHA_DIGEST_LENGTH];
-	int i;
-
-	SHA1(buf, len, digest);
-
-	for (i = 0; i < SHA_DIGEST_LENGTH; i ++) {
-		*ptr++ = hex_digits[digest[i] & 0xf];
-		*ptr++ = hex_digits[(digest[i] >> 4) & 0xf];
-	}
-	*ptr++ = 0;
-
-	return string;
-}
-
-#define sha1_string(buf, len) \
-	__sha1_string(buf, len, alloca(SHA_DIGEST_LENGTH * 2 + 1))
-
 static void store_value(const unsigned char *value, size_t size,
 		const char *key_str)
 {
 	char path[PATH_MAX];
 	int fd, len;
+
+	printf("store_value(%s)\n", key_str);
 
 	len = snprintf(path, PATH_MAX, "%s/%s", value_dir, key_str);
 	if (len == PATH_MAX) {
@@ -452,13 +470,15 @@ static void store_value(const unsigned char *value, size_t size,
 		return;
 	}
 
-	fd = open(path, O_WRONLY|O_EXCL|O_CREAT);
+	fd = open(path, O_WRONLY|O_EXCL|O_CREAT, 0644);
 	if (fd < 0) {
-		fprintf(stderr, "store_value(%s): %s\n", path, strerror(errno));
+		fprintf(stderr, "\t%s\n", strerror(errno));
 		return;
 	}
 
-	write(fd, value, size);
+	if (write(fd, value, size) < 0)
+		fprintf(stderr, "\t%s\n", strerror(errno));
+
 	close(fd);
 }
 
@@ -508,7 +528,7 @@ static void proc_msg(const char *buf, size_t len, struct node *node)
 
 		store_value(value, len, key_str);
 
-		nearest_nodes(msg, output, NODE_VEC_MAX);
+		nearest_nodes(key_str, output, NODE_VEC_MAX);
 
 		request_done(key_str, output);
 
@@ -538,7 +558,8 @@ static void readcb(struct bufferevent *bev, void *arg)
 
 	for (;;) {
 		buf = (const char *)EVBUFFER_DATA(bev->input);
-		end = (const char *)evbuffer_find(bev->input, (u_char *)"\r\n", 2);
+		end = (const char *)evbuffer_find(bev->input,
+				(u_char *)"\r\n", 2);
 		if (!end)
 			return;
 
@@ -610,7 +631,8 @@ static void usage(int exit_code)
 	show_opt("Usage: %s [ options ]\n", prog);
 	show_opt("--help\n");
 	show_opt("--peer <(ip|hostname):port>    connect to this peer\n");
-	show_opt("--addr <[ip:]port>             listen on specified IP and port\n");
+	show_opt("--addr <[ip:]port>             "
+			"listen on specified IP and port\n");
 	show_opt("--chunk-dir <path>             path to chunk directory\n");
 	exit(exit_code);
 }

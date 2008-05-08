@@ -319,8 +319,6 @@ static int __nearest_nodes(const unsigned char *key, struct node **node_vec,
 
 	list_for_each_entry(node, &node_list, nd_entry) {
 		d = node_distance(node, key);
-		if (d < 0)
-			continue;
 		for (i = 0; i < max; i ++) {
 			if (!node_vec[i] || d < dist_vec[i]) {
 				node_vec[i] = node;

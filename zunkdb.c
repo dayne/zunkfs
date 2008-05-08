@@ -58,6 +58,7 @@ static LIST_HEAD(client_list);
 
 static char *prog;
 static struct sockaddr_in my_addr;
+static unsigned forward_stores = 0;
 
 static inline unsigned char *__data_digest(const void *buf, size_t len,
 		unsigned char *digest)
@@ -308,9 +309,9 @@ static inline int node_distance(const struct node *node,
 }
 
 static int __nearest_nodes(const unsigned char *key, struct node **node_vec,
-		int max)
+		int *dist_vec, int max)
 {
-	int d, i, dist_vec[max], count = -1;
+	int d, i, count = -1;
 	struct node *node;
 
 	for (i = 0; i < max; i ++)
@@ -338,9 +339,10 @@ static void nearest_nodes(const unsigned char *key, struct evbuffer *output,
 		int max)
 {
 	struct node *node_vec[max];
+	int dist_vec[max];
 	int i, count;
 
-	count = __nearest_nodes(key, node_vec, max);
+	count = __nearest_nodes(key, node_vec, dist_vec, max);
 	printf("%d nodes near %s\n", count, digest_string(key));
 	for (i = 0; i < count; i ++) {
 		evbuffer_add_printf(output, "%s %s:%u\r\n",
@@ -428,6 +430,33 @@ static void store_value(const unsigned char *value, size_t size,
 	close(fd);
 }
 
+static void forward_value(const unsigned char *key, const char *encoded_value,
+		struct node *from_node)
+{
+	struct node *node_vec[NODE_VEC_MAX];
+	int dist_vec[NODE_VEC_MAX];
+	struct evbuffer *buf;
+	int i, count, d;
+
+	buf = evbuffer_new();
+	if (!buf)
+		return;
+
+	d = node_distance(from_node, key);
+
+	count = __nearest_nodes(key, node_vec, dist_vec, NODE_VEC_MAX);
+	for (i = 0; i < count; i ++) {
+		if (d < dist_vec[i])
+			continue;
+		evbuffer_add_printf(buf, "%s %s\r\n", STORE_VALUE,
+				encoded_value);
+		bufferevent_write_buffer(node_vec[i]->bev, buf);
+	}
+
+	evbuffer_free(buf);
+}
+
+
 static inline void request_done(const char *key_str, struct evbuffer *output)
 {
 	evbuffer_add_printf(output, "%s %s\r\n", REQUEST_DONE, key_str);
@@ -475,7 +504,10 @@ static void proc_msg(const char *buf, size_t len, struct node *node)
 
 		store_value(value, len, key);
 
-		nearest_nodes(key, output, NODE_VEC_MAX);
+		if (forward_stores)
+			forward_value(key, msg, node);
+		else
+			nearest_nodes(key, output, NODE_VEC_MAX);
 
 		request_done(digest_string(key), output);
 
@@ -562,6 +594,7 @@ enum {
 	OPT_PEER = 'p',
 	OPT_ADDR = 'a',
 	OPT_PATH = 'c',
+	OPT_FORWORD_STORES = 'f',
 };
 
 static const char short_opts[] = {
@@ -569,6 +602,7 @@ static const char short_opts[] = {
 	OPT_PEER,
 	OPT_ADDR,
 	OPT_PATH,
+	OPT_FORWORD_STORES,
 	0
 };
 
@@ -577,6 +611,7 @@ static const struct option long_opts[] = {
 	{ "peer", required_argument, NULL, OPT_PEER },
 	{ "addr", required_argument, NULL, OPT_ADDR },
 	{ "chunk-dir", required_argument, NULL, OPT_PATH },
+	{ "forward-store", no_argument, NULL, OPT_FORWORD_STORES },
 	{ NULL }
 };
 
@@ -584,7 +619,9 @@ static const struct option long_opts[] = {
 "-h|--help\n"\
 "-p|--peer <(ip|hostname):port>    Connect to this peer.\n"\
 "-a|--addr <[ip:]port>             Listen on specified IP and port.\n"\
-"-c|--chunk-dir <path>             Path to chunk directory.\n"
+"-c|--chunk-dir <path>             Path to chunk directory.\n"\
+"-f|--forward-store                Automatically forward store requests,\n"\
+"                                  and don't send nearest nodes as a reply.\n"
 
 static void usage(int exit_code)
 {
@@ -633,6 +670,10 @@ static int proc_opt(int opt, char *arg)
 		}
 
 		value_dir = arg;
+		return 0;
+
+	case OPT_FORWORD_STORES:
+		forward_stores = 1;
 		return 0;
 
 	default:

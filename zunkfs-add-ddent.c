@@ -144,9 +144,9 @@ usage:
 		goto usage;
 	}
 	
-	fd = open(SUPER_SECRET_FILE, O_WRONLY);
+	fd = open(DIR_AS_FILE, O_WRONLY);
 	if (fd < 0) {
-		fprintf(stderr, "Can't open %s/%s: %s\n", cwd, SUPER_SECRET_FILE, 
+		fprintf(stderr, "Can't open %s/%s: %s\n", cwd, DIR_AS_FILE, 
 				strerror(errno));
 		exit(-2);
 	}

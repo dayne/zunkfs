@@ -83,10 +83,10 @@ int main(int argc, char **argv)
 		}
 	}
 
-	fd = open(SUPER_SECRET_FILE, O_RDONLY);
+	fd = open(DIR_AS_FILE, O_RDONLY);
 	if (fd < 0) {
 		fprintf(stderr, "Can't open %s/%s: %s\n", cwd,
-				SUPER_SECRET_FILE, strerror(errno));
+				DIR_AS_FILE, strerror(errno));
 		exit(-2);
 	}
 

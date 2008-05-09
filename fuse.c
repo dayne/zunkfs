@@ -31,11 +31,11 @@
 static int zunkfs_getattr(const char *path, struct stat *stbuf)
 {
 	struct dentry *dentry;
-	int super_secret = 0;
+	int dir_as_file = 0;
 
 	TRACE("%s\n", path);
 
-	dentry = find_dentry_super_secret(path, &super_secret);
+	dentry = find_dentry(path, &dir_as_file);
 	if (IS_ERR(dentry))
 		return -PTR_ERR(dentry);
 
@@ -55,7 +55,7 @@ static int zunkfs_getattr(const char *path, struct stat *stbuf)
 	stbuf->st_blksize = 4096;
 	stbuf->st_blocks = (dentry->size + 4095) / 4096;
 
-	if (super_secret) {
+	if (dir_as_file) {
 		stbuf->st_mode &= ~S_IFDIR;
 		stbuf->st_mode |= S_IFREG;
 		stbuf->st_size *= sizeof(struct disk_dentry);
@@ -79,7 +79,7 @@ static int zunkfs_readdir(const char *path, void *filldir_buf,
 
 	TRACE("%s\n", path);
 
-	dentry = find_dentry(path);
+	dentry = find_dentry(path, NULL);
 	if (IS_ERR(dentry))
 		return -PTR_ERR(dentry);
 
@@ -228,7 +228,7 @@ static int zunkfs_unlink(const char *path)
 
 	TRACE("%s\n", path);
 
-	dentry = find_dentry(path);
+	dentry = find_dentry(path, NULL);
 	err = -PTR_ERR(dentry);
 	if (!IS_ERR(dentry)) {
 		err = del_dentry(dentry);
@@ -245,7 +245,7 @@ static int zunkfs_rmdir(const char *path)
 
 	TRACE("%s\n", path);
 
-	dentry = find_dentry(path);
+	dentry = find_dentry(path, NULL);
 	if (IS_ERR(dentry))
 		return -PTR_ERR(dentry);
 
@@ -269,7 +269,7 @@ static int zunkfs_utimens(const char *path, const struct timespec tv[2])
 
 	TRACE("%s\n", path);
 
-	dentry = find_dentry(path);
+	dentry = find_dentry(path, NULL);
 	if (IS_ERR(dentry))
 		return -PTR_ERR(dentry);
 
@@ -298,7 +298,7 @@ static int zunkfs_rename(const char *src, const char *dst)
 	if (dentry)
 		goto out;
 
-	dentry = find_dentry(src);
+	dentry = find_dentry(src, NULL);
 	if (IS_ERR(dentry)) {
 		err = -PTR_ERR(dentry);
 		goto out;
@@ -318,7 +318,7 @@ static int zunkfs_chmod(const char *path, mode_t mode)
 	if ((mode & S_IFMT) != 0)
 		return -EINVAL;
 
-	dentry = find_dentry(path);
+	dentry = find_dentry(path, NULL);
 	if (IS_ERR(dentry))
 		return -PTR_ERR(dentry);
 

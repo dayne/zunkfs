@@ -59,7 +59,8 @@ int main(int argc, char **argv)
 				(char *)EVBUFFER_DATA(buf));
 	}
 
-	size = base64_decode((const char *)EVBUFFER_DATA(buf), value_decoded, size);
+	size = base64_decode((const char *)EVBUFFER_DATA(buf), value_decoded,
+			size);
 
 	printf("%zu %s\n", size, sha1_string(value_decoded, VALUE_SIZE));
 

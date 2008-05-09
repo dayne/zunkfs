@@ -16,6 +16,8 @@
 #include "zunkfs.h"
 #include "chunk-db.h"
 #include "dir.h"
+#include "digest.h"
+#include "utils.h"
 
 static int write_dentry(int fd, struct disk_dentry *de)
 {
@@ -35,26 +37,13 @@ static int write_dentry(int fd, struct disk_dentry *de)
 	return len;
 }
 
-static int str2digest(const char *str, unsigned char *digest)
+static inline int str2digest(const char *str, unsigned char *digest)
 {
-	static const char digits[] = "0123456789abcdef";
-	const char *ptr, *d0, *d1;
-	int i;
+	char *d;
 
-	if (strlen(str) != CHUNK_DIGEST_STRLEN)
-		return -EINVAL;
-
-	memset(digest, 0, CHUNK_DIGEST_LEN);
-
-	for (ptr = str, i = 0; *ptr; i ++) {
-		d0 = strchr(digits, tolower(*ptr++));
-		d1 = strchr(digits, tolower(*ptr++));
-		if (!d0 || !d1)
-			return -EINVAL;
-		digest[i] = (d0 - digits) | ((d1 - digits) << 4);
-	}
-
-	assert(!strcasecmp(str, digest_string(digest)));
+	d = __string_digest(str, digest);
+	if (IS_ERR(d))
+		return PTR_ERR(d);
 
 	return 0;
 }

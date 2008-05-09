@@ -140,6 +140,9 @@ int main(int argc, char **argv)
 			!= -1)
 		proc_opt(opt, optarg);
 
+	if (argc != optind)
+		usage(-1);
+
 	fd = open(DIR_AS_FILE, O_RDONLY);
 	if (fd < 0) {
 		fprintf(stderr, "Can't open %s/%s: %s\n", cwd,

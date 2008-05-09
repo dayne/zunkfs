@@ -160,7 +160,15 @@ static void cache_node(struct node *node)
 	unlock(&cache_mutex);
 }
 
-static void __store_node(struct request *request, struct sockaddr_in *addr)
+static void cache_node_list(struct list_head *list)
+{
+	lock(&cache_mutex);
+	while (!list_empty(list))
+		__cache_node(list_entry(list->next, struct node, node_entry));
+	unlock(&cache_mutex);
+}
+
+static void store_addr(struct request *request, struct sockaddr_in *addr)
 {
 	struct sockaddr_in *uaddr;
 	int i;
@@ -198,7 +206,7 @@ static void store_node(struct request *request, char *addr_str)
 	if (!inet_aton(addr_str, &addr.sin_addr))
 		return;
 
-	__store_node(request, &addr);
+	store_addr(request, &addr);
 }
 
 #define FIND_CHUNK		"find_chunk"
@@ -294,7 +302,7 @@ again:
 		event_add(&node->connect_event, NULL);
 	else {
 		/*
-		 * this is just to let cache_node() that
+		 * this is just to let cache_node() know that
 		 * this is a dead node.
 		 */
 		event_add(&node->connect_event, NULL);
@@ -399,7 +407,7 @@ static int send_request(struct evbuffer *evbuf, struct zdb_info *db_info,
 		return -EIO;
 	}
 
-	__store_node(&request, &db_info->start_node);
+	store_addr(&request, &db_info->start_node);
 
 	timeout_set(&to_event, timeout_cb, &request);
 	event_base_set(request.base, &to_event);
@@ -437,12 +445,7 @@ static int send_request(struct evbuffer *evbuf, struct zdb_info *db_info,
 		}
 	}
 
-	lock(&cache_mutex);
-	while (!list_empty(&request.node_list)) {
-		__cache_node(list_entry(request.node_list.next, struct node,
-					node_entry));
-	}
-	unlock(&cache_mutex);
+	cache_node_list(&request.node_list);
 
 	timeout_del(&to_event);
 

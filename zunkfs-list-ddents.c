@@ -64,7 +64,7 @@ static void proc_opt(int opt, char *arg)
 	case OPT_CHUNK_DB:
 		if (!strncmp(arg, "ro,", 3))
 			err = add_chunkdb(CHUNKDB_RO, arg + 3);
-		else if (!strncmp(arg, "wt,rw,", 6))
+		else if (!strncmp(arg, "rw,wt,", 6))
 			err = add_chunkdb(CHUNKDB_RW|CHUNKDB_WT, arg + 6);
 		else if (!strncmp(arg, "rw,", 3))
 			err = add_chunkdb(CHUNKDB_RW, arg + 3);

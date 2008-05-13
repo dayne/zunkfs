@@ -28,7 +28,8 @@ CORE_OBJS=chunk-tree.o \
 	  file.o \
 	  utils.o \
 	  mutex.o \
-	  base64.o
+	  base64.o \
+	  digest.o
 
 DBTYPES=chunk-db-local.o \
 	chunk-db-cmd.o \
@@ -69,7 +70,7 @@ zunkfs-list-ddents: $(CORE_OBJS) $(DBTYPES) zunkfs-list-ddents.o
 zunkfs-add-ddent: $(CORE_OBJS) $(DBTYPES) zunkfs-add-ddent.o 
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-zunkdb: zunkdb.o base64.o
+zunkdb: zunkdb.o base64.o digest.o utils.o mutex.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 test-client: client.o base64.o

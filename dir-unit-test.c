@@ -39,7 +39,7 @@ int main(int argc, char **argv)
 	zunkfs_log_fd = stdout;
 	zunkfs_log_level = 'T';
 
-	err = add_chunkdb(CHUNKDB_RW, "mem:");
+	err = add_chunkdb("rw,mem:");
 	if (err)
 		panic("add_chunkdb: %s\n", strerror(-err));
 

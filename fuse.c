@@ -449,14 +449,7 @@ static int opt_proc(void *data, const char *arg, int key,
 		return 0;
 	case OPT_CHUNK_DB:
 		arg += 11;
-		if (!strncmp(arg, "ro,", 3))
-			err = add_chunkdb(CHUNKDB_RO, arg + 3);
-		else if (!strncmp(arg, "rw,wt,", 6))
-			err = add_chunkdb(CHUNKDB_RW|CHUNKDB_WT, arg + 6);
-		else if (!strncmp(arg, "rw,", 3))
-			err = add_chunkdb(CHUNKDB_RW, arg + 3);
-		else
-			return -1;
+		err = add_chunkdb(arg);
 		if (err) {
 			fprintf(stderr, "Failed to add chunkdb %s: %s\n", arg,
 					strerror(-err));

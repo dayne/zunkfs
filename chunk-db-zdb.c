@@ -503,11 +503,20 @@ static int zdb_write_chunk(const unsigned char *chunk,
 	return send_request(request, db_info, digest, NULL);
 }
 
+static const char *suffix(const char *str, const char *prefix)
+{
+	int pfxlen = strlen(prefix);
+	if (!strncmp(str, prefix, pfxlen))
+		return str + pfxlen;
+	return NULL;
+}
+
 static int parse_spec(const char *spec, struct zdb_info *zdb_info)
 {
 	char *addr, *port;
 	char *spec_copy;
 	char *opt;
+	const char *value;
 	int opt_count;
 
 	spec_copy = alloca(strlen(spec + 1));
@@ -534,13 +543,13 @@ static int parse_spec(const char *spec, struct zdb_info *zdb_info)
 			if (!inet_aton(addr, &zdb_info->start_node.sin_addr))
 				return -EINVAL;
 
-		} else if (!strncmp(opt, "timeout=", 8)) {
-			zdb_info->timeout.tv_sec = atoi(opt + 8);
+		} else if ((value = suffix(opt, "timeout="))) {
+			zdb_info->timeout.tv_sec = atoi(value);
 			if (!zdb_info->timeout.tv_sec)
 				return -EINVAL;
 
-		} else if (!strncmp(opt, "concurrency=", 12)) {
-			zdb_info->max_concurrency = atoi(opt + 12);
+		} else if ((value = suffix(opt, "concurrency="))) {
+			zdb_info->max_concurrency = atoi(value);
 			if (!zdb_info->max_concurrency)
 				return -EINVAL;
 
@@ -564,10 +573,9 @@ static struct chunk_db *zdb_chunkdb_ctor(int mode, const char *spec)
 	struct zdb_info *zdb_info;
 	int err;
 
-	if (strncmp(spec, "zunkdb:", 7))
+	spec = suffix(spec, "zunkdb:");
+	if (!spec)
 		return NULL;
-
-	spec += 7;
 
 	cdb = malloc(sizeof(struct chunk_db) + sizeof(struct zdb_info));
 	if (!cdb)

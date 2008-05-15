@@ -124,28 +124,16 @@ found:
 	return node;
 }
 
-static void __cache_node(struct node *node, int err)
+static void release_node(struct node *node)
 {
 	node->request = NULL;
-
 	bufferevent_disable(node->bev, EV_READ|EV_WRITE);
-
 	list_del(&node->node_entry);
+}
 
-	/*
-	 * Nodes that didn't finish connecting before request
-	 * finished are considered dead for the next minute.
-	 */
-
-	if (event_pending(&node->connect_event, EV_WRITE, NULL) ||
-			err == -ETIMEDOUT) {
-		event_del(&node->connect_event);
-		close(node->sk);
-		list_add(&node->node_entry, &dead_nodes);
-		gettimeofday(&node->stamp, NULL);
-		node->stamp.tv_sec += 60;
-		return;
-	}
+static void __cache_node(struct node *node)
+{
+	release_node(node);
 
 	list_add(&node->node_entry, &node_cache);
 
@@ -158,16 +146,32 @@ static void __cache_node(struct node *node, int err)
 static void cache_node(struct node *node)
 {
 	lock(&cache_mutex);
-	__cache_node(node, 0);
+	__cache_node(node);
 	unlock(&cache_mutex);
 }
 
-static void cache_node_list(struct list_head *list, int err)
+static void kill_node(struct node *node)
 {
+	release_node(node);
+	event_del(&node->connect_event);
+	close(node->sk);
+	list_add(&node->node_entry, &dead_nodes);
+	gettimeofday(&node->stamp, NULL);
+	node->stamp.tv_sec += 60;
+}
+
+static void release_node_list(struct list_head *list, int err)
+{
+	struct node *node;
+
 	lock(&cache_mutex);
 	while (!list_empty(list)) {
-		__cache_node(list_entry(list->next, struct node, node_entry),
-				err);
+		node = list_entry(list->next, struct node, node_entry);
+		if (event_pending(&node->connect_event, EV_WRITE, NULL) ||
+				err == -ETIMEDOUT)
+			kill_node(node);
+		else
+			__cache_node(node);
 	}
 	unlock(&cache_mutex);
 }
@@ -459,7 +463,7 @@ static int send_request(struct evbuffer *evbuf, struct zdb_info *db_info,
 		}
 	}
 
-	cache_node_list(&request.node_list, err);
+	release_node_list(&request.node_list, err);
 
 	timeout_del(&to_event);
 

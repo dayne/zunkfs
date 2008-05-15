@@ -123,7 +123,7 @@ found:
 	return node;
 }
 
-static void __cache_node(struct node *node)
+static void __cache_node(struct node *node, int err)
 {
 	node->request = NULL;
 
@@ -136,7 +136,8 @@ static void __cache_node(struct node *node)
 	 * finished are considered dead for the next minute.
 	 */
 
-	if (event_pending(&node->connect_event, EV_WRITE, NULL)) {
+	if (event_pending(&node->connect_event, EV_WRITE, NULL) ||
+			err == -ETIMEDOUT) {
 		event_del(&node->connect_event);
 		close(node->sk);
 		list_add(&node->node_entry, &dead_nodes);
@@ -156,15 +157,17 @@ static void __cache_node(struct node *node)
 static void cache_node(struct node *node)
 {
 	lock(&cache_mutex);
-	__cache_node(node);
+	__cache_node(node, 0);
 	unlock(&cache_mutex);
 }
 
-static void cache_node_list(struct list_head *list)
+static void cache_node_list(struct list_head *list, int err)
 {
 	lock(&cache_mutex);
-	while (!list_empty(list))
-		__cache_node(list_entry(list->next, struct node, node_entry));
+	while (!list_empty(list)) {
+		__cache_node(list_entry(list->next, struct node, node_entry),
+				err);
+	}
 	unlock(&cache_mutex);
 }
 
@@ -445,7 +448,7 @@ static int send_request(struct evbuffer *evbuf, struct zdb_info *db_info,
 		}
 	}
 
-	cache_node_list(&request.node_list);
+	cache_node_list(&request.node_list, err);
 
 	timeout_del(&to_event);
 

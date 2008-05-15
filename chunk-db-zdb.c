@@ -28,6 +28,7 @@
 struct zdb_info {
 	struct sockaddr_in start_node;
 	struct timeval timeout;
+	unsigned min_concurrency;
 	unsigned max_concurrency;
 };
 
@@ -392,6 +393,7 @@ static int send_request(struct evbuffer *evbuf, struct zdb_info *db_info,
 	struct timeval timeout = db_info->timeout;
 	struct request request;
 	struct event to_event;
+	struct node *node;
 	int err;
 
 	request.evbuf = evbuf;
@@ -410,7 +412,16 @@ static int send_request(struct evbuffer *evbuf, struct zdb_info *db_info,
 		return -EIO;
 	}
 
-	store_addr(&request, &db_info->start_node);
+	lock(&cache_mutex);
+	list_for_each_entry(node, &node_cache, node_entry) {
+		if (request.addr_concurrency >= db_info->min_concurrency)
+			break;
+		store_addr(&request, &node->addr);
+	}
+	unlock(&cache_mutex);
+
+	if (request.addr_concurrency < db_info->min_concurrency)
+		store_addr(&request, &db_info->start_node);
 
 	timeout_set(&to_event, timeout_cb, &request);
 	event_base_set(request.base, &to_event);
@@ -548,7 +559,12 @@ static int parse_spec(const char *spec, struct zdb_info *zdb_info)
 			if (!zdb_info->timeout.tv_sec)
 				return -EINVAL;
 
-		} else if ((value = suffix(opt, "concurrency="))) {
+		} else if ((value = suffix(opt, "min-concurrency="))) {
+			zdb_info->min_concurrency = atoi(value);
+			if (!zdb_info->min_concurrency)
+				return -EINVAL;
+
+		} else if ((value = suffix(opt, "max-concurrency="))) {
 			zdb_info->max_concurrency = atoi(value);
 			if (!zdb_info->max_concurrency)
 				return -EINVAL;
@@ -561,6 +577,11 @@ static int parse_spec(const char *spec, struct zdb_info *zdb_info)
 
 	if (!addr) {
 		ERROR("No address.\n");
+		return -EINVAL;
+	}
+
+	if (zdb_info->max_concurrency < zdb_info->min_concurrency) {
+		ERROR("max-concurrency < min-concurrency\n");
 		return -EINVAL;
 	}
 
@@ -588,6 +609,7 @@ static struct chunk_db *zdb_chunkdb_ctor(int mode, const char *spec)
 	zdb_info->timeout.tv_usec = 0;
 
 	zdb_info->max_concurrency = -1;
+	zdb_info->min_concurrency = 1;
 
 	cdb->read_chunk = zdb_read_chunk;
 	cdb->write_chunk = (mode == CHUNKDB_RW) ? zdb_write_chunk : NULL;

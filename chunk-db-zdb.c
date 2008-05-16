@@ -79,6 +79,11 @@ static inline int node_is_addr(const struct node *node,
 	return same_addr(&node->addr, addr);
 }
 
+static inline int node_connected(struct node *node)
+{
+	return !event_pending(&node->connect_event, EV_WRITE, NULL);
+}
+
 static void free_node(struct node *node)
 {
 	if (node->request)
@@ -150,7 +155,7 @@ static void cache_node(struct node *node)
 	unlock(&cache_mutex);
 }
 
-static void kill_node(struct node *node)
+static void __kill_node(struct node *node)
 {
 	release_node(node);
 	event_del(&node->connect_event);
@@ -160,6 +165,13 @@ static void kill_node(struct node *node)
 	node->stamp.tv_sec += 60;
 }
 
+static void kill_node(struct node *node)
+{
+	lock(&cache_mutex);
+	__kill_node(node);
+	unlock(&cache_mutex);
+}
+
 static void release_node_list(struct list_head *list, int err)
 {
 	struct node *node;
@@ -167,9 +179,8 @@ static void release_node_list(struct list_head *list, int err)
 	lock(&cache_mutex);
 	while (!list_empty(list)) {
 		node = list_entry(list->next, struct node, node_entry);
-		if (event_pending(&node->connect_event, EV_WRITE, NULL) ||
-				err == -ETIMEDOUT)
-			kill_node(node);
+		if (!node_connected(node) || err == -ETIMEDOUT)
+			__kill_node(node);
 		else
 			__cache_node(node);
 	}
@@ -309,12 +320,7 @@ again:
 	if (errno == EALREADY || errno == EINPROGRESS)
 		event_add(&node->connect_event, NULL);
 	else {
-		/*
-		 * this is just to let cache_node() know that
-		 * this is a dead node.
-		 */
-		event_add(&node->connect_event, NULL);
-		cache_node(node);
+		kill_node(node);
 		TRACE("connect failed\n");
 	}
 }

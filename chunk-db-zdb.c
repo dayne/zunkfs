@@ -15,6 +15,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <openssl/sha.h>
+#include <netdb.h>
 
 #include <event.h>
 
@@ -537,11 +538,17 @@ static const char *suffix(const char *str, const char *prefix)
 
 static int parse_spec(const char *spec, struct zdb_info *zdb_info)
 {
+	static struct addrinfo ai_hint = {
+		.ai_family = AF_INET,
+		.ai_socktype = SOCK_STREAM,
+	};
+
+	struct addrinfo *ai_list;
 	char *addr, *port;
 	char *spec_copy;
 	char *opt;
 	const char *value;
-	int opt_count;
+	int err, opt_count;
 
 	spec_copy = alloca(strlen(spec + 1));
 	if (!spec_copy)
@@ -561,11 +568,25 @@ static int parse_spec(const char *spec, struct zdb_info *zdb_info)
 			}
 			*port++ = 0;
 
-			zdb_info->start_node.sin_family = AF_INET;
-			zdb_info->start_node.sin_port = htons(atoi(port));
+			err = getaddrinfo(addr, port, &ai_hint, &ai_list);
+			if (err) {
+				err = -errno;
+				ERROR("getaddrinfo: %s\n", strerror(errno));
+				return err;
+			}
 
-			if (!inet_aton(addr, &zdb_info->start_node.sin_addr))
+			if (!ai_list) {
+				ERROR("ai_list == NULL\n");
 				return -EINVAL;
+			}
+
+			/*
+			 * Just take the first addr for now.
+			 */
+			zdb_info->start_node =
+				*(struct sockaddr_in *)ai_list->ai_addr;
+
+			freeaddrinfo(ai_list);
 
 		} else if ((value = suffix(opt, "timeout="))) {
 			zdb_info->timeout.tv_sec = atoi(value);

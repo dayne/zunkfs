@@ -108,6 +108,9 @@ static struct node *find_node(const struct sockaddr_in *sa)
 		}
 	}
 
+	if (list_empty(&dead_nodes))
+		goto not_found;
+
 	gettimeofday(&now, NULL);
 
 	list_for_each_entry_safe(node, next, &dead_nodes, node_entry) {
@@ -121,7 +124,7 @@ static struct node *find_node(const struct sockaddr_in *sa)
 			goto found;
 		}
 	}
-	
+not_found:	
 	node = NULL;
 found:
 	unlock(&cache_mutex);

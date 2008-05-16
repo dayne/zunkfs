@@ -39,33 +39,6 @@ static inline unsigned char *digest_chunk(const unsigned char *chunk,
 	return digest;
 }
 
-int verify_chunk(const unsigned char *chunk, const unsigned char *digest)
-{
-	unsigned char tmp_digest[CHUNK_DIGEST_LEN];
-	if (cmp_digest(digest, digest_chunk(chunk, tmp_digest))) {
-		TRACE("chunk failed verification: %s vs %s\n",
-				digest_string(digest),
-				digest_string(tmp_digest));
-		return 0;
-	}
-	return 1;
-}
-
-const char *__digest_string(const unsigned char *digest, char *strbuf)
-{
-	static const char digit[] = "0123456789abcdef";
-	char *ptr;
-	int i;
-
-	for (i = 0, ptr = strbuf; i < CHUNK_DIGEST_LEN; i ++) {
-		*ptr++ = digit[digest[i] & 0xf];
-		*ptr++ = digit[(digest[i] >> 4) & 0xf];
-	}
-	*ptr = 0;
-
-	return strbuf;
-}
-
 #define INT_CHUNK_SIZE	((CHUNK_SIZE + sizeof(int) - 1) / sizeof(int))
 
 int random_chunk_digest(unsigned char *digest)

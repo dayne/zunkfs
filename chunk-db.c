@@ -62,10 +62,22 @@ void register_chunkdb(chunkdb_ctor ctor)
 	ctor_list[n] = ctor;
 }
 
-int add_chunkdb(int mode, const char *spec)
+int add_chunkdb(const char *spec)
 {
 	struct chunk_db *cdb;
-	int i, n;
+	int i, n, mode;
+
+	if (!strncmp(spec, "ro,", 3)) {
+		mode = CHUNKDB_RO;
+		spec += 3;
+	} else if (!strncmp(spec, "rw,wt,", 6)) {
+		mode = CHUNKDB_RW|CHUNKDB_WT;
+		spec += 6;
+	} else if (!strncmp(spec, "rw,", 3)) {
+		mode = CHUNKDB_RW;
+		spec += 3;
+	} else
+		return -EINVAL;
 
 	for (i = 0; i < ctor_count; i ++) {
 		cdb = ctor_list[i](mode, spec);

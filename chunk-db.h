@@ -20,7 +20,7 @@ struct chunk_db {
 typedef struct chunk_db *(*chunkdb_ctor)(int mode, const char *spec);
 
 void register_chunkdb(chunkdb_ctor ctor);
-int add_chunkdb(int mode, const char *spec);
+int add_chunkdb(const char *spec);
 
 #endif
 

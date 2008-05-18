@@ -8,7 +8,7 @@
 #include "mutex.h"
 #include "utils.h"
 
-#define SUPER_SECRET_FILE	".super_secret_file"
+#define DIR_AS_FILE	".super_secret_file"
 
 /* I'd like disk_dentry to fit into 256 bytes. */
 #define DDENT_NAME_MAX	(256 - 60)
@@ -82,14 +82,9 @@ struct chunk_node *get_dentry_chunk(struct dentry *dentry, unsigned chunk_nr);
 struct dentry *find_dentry_parent(const char *path, struct dentry **pparent,
 		const char **name);
 
+struct dentry *find_dentry(const char *path, int *dir_as_file);
+
 struct dentry *create_dentry(const char *path, mode_t mode);
-
-struct dentry *find_dentry_super_secret(const char *path, int *is_super_secret);
-
-static inline struct dentry *find_dentry(const char *path)
-{
-	return find_dentry_parent(path, NULL, NULL) ?: ERR_PTR(ENOENT);
-}
 
 int rename_dentry(struct dentry *dentry, const char *new_name,
 		struct dentry *new_parent);

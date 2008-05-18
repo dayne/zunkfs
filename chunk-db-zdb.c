@@ -15,6 +15,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <openssl/sha.h>
+#include <netdb.h>
 
 #include <event.h>
 
@@ -28,6 +29,7 @@
 struct zdb_info {
 	struct sockaddr_in start_node;
 	struct timeval timeout;
+	unsigned min_concurrency;
 	unsigned max_concurrency;
 };
 
@@ -78,6 +80,11 @@ static inline int node_is_addr(const struct node *node,
 	return same_addr(&node->addr, addr);
 }
 
+static inline int node_connected(struct node *node)
+{
+	return !event_pending(&node->connect_event, EV_WRITE, NULL);
+}
+
 static void free_node(struct node *node)
 {
 	if (node->request)
@@ -102,6 +109,9 @@ static struct node *find_node(const struct sockaddr_in *sa)
 		}
 	}
 
+	if (list_empty(&dead_nodes))
+		goto not_found;
+
 	gettimeofday(&now, NULL);
 
 	list_for_each_entry_safe(node, next, &dead_nodes, node_entry) {
@@ -115,7 +125,7 @@ static struct node *find_node(const struct sockaddr_in *sa)
 			goto found;
 		}
 	}
-	
+not_found:	
 	node = NULL;
 found:
 	unlock(&cache_mutex);
@@ -123,27 +133,16 @@ found:
 	return node;
 }
 
-static void __cache_node(struct node *node)
+static void release_node(struct node *node)
 {
 	node->request = NULL;
-
 	bufferevent_disable(node->bev, EV_READ|EV_WRITE);
-
 	list_del(&node->node_entry);
+}
 
-	/*
-	 * Nodes that didn't finish connecting before request
-	 * finished are considered dead for the next minute.
-	 */
-
-	if (event_pending(&node->connect_event, EV_WRITE, NULL)) {
-		event_del(&node->connect_event);
-		close(node->sk);
-		list_add(&node->node_entry, &dead_nodes);
-		gettimeofday(&node->stamp, NULL);
-		node->stamp.tv_sec += 60;
-		return;
-	}
+static void __cache_node(struct node *node)
+{
+	release_node(node);
 
 	list_add(&node->node_entry, &node_cache);
 
@@ -160,7 +159,39 @@ static void cache_node(struct node *node)
 	unlock(&cache_mutex);
 }
 
-static void __store_node(struct request *request, struct sockaddr_in *addr)
+static void __kill_node(struct node *node)
+{
+	release_node(node);
+	event_del(&node->connect_event);
+	close(node->sk);
+	list_add(&node->node_entry, &dead_nodes);
+	gettimeofday(&node->stamp, NULL);
+	node->stamp.tv_sec += 60;
+}
+
+static void kill_node(struct node *node)
+{
+	lock(&cache_mutex);
+	__kill_node(node);
+	unlock(&cache_mutex);
+}
+
+static void release_node_list(struct list_head *list, int err)
+{
+	struct node *node;
+
+	lock(&cache_mutex);
+	while (!list_empty(list)) {
+		node = list_entry(list->next, struct node, node_entry);
+		if (!node_connected(node) || err == -ETIMEDOUT)
+			__kill_node(node);
+		else
+			__cache_node(node);
+	}
+	unlock(&cache_mutex);
+}
+
+static void store_addr(struct request *request, struct sockaddr_in *addr)
 {
 	struct sockaddr_in *uaddr;
 	int i;
@@ -198,7 +229,7 @@ static void store_node(struct request *request, char *addr_str)
 	if (!inet_aton(addr_str, &addr.sin_addr))
 		return;
 
-	__store_node(request, &addr);
+	store_addr(request, &addr);
 }
 
 #define FIND_CHUNK		"find_chunk"
@@ -293,12 +324,7 @@ again:
 	if (errno == EALREADY || errno == EINPROGRESS)
 		event_add(&node->connect_event, NULL);
 	else {
-		/*
-		 * this is just to let cache_node() that
-		 * this is a dead node.
-		 */
-		event_add(&node->connect_event, NULL);
-		cache_node(node);
+		kill_node(node);
 		TRACE("connect failed\n");
 	}
 }
@@ -381,6 +407,7 @@ static int send_request(struct evbuffer *evbuf, struct zdb_info *db_info,
 	struct timeval timeout = db_info->timeout;
 	struct request request;
 	struct event to_event;
+	struct node *node;
 	int err;
 
 	request.evbuf = evbuf;
@@ -399,7 +426,16 @@ static int send_request(struct evbuffer *evbuf, struct zdb_info *db_info,
 		return -EIO;
 	}
 
-	__store_node(&request, &db_info->start_node);
+	lock(&cache_mutex);
+	list_for_each_entry(node, &node_cache, node_entry) {
+		if (request.addr_concurrency >= db_info->min_concurrency)
+			break;
+		store_addr(&request, &node->addr);
+	}
+	unlock(&cache_mutex);
+
+	if (request.addr_concurrency < db_info->min_concurrency)
+		store_addr(&request, &db_info->start_node);
 
 	timeout_set(&to_event, timeout_cb, &request);
 	event_base_set(request.base, &to_event);
@@ -437,12 +473,7 @@ static int send_request(struct evbuffer *evbuf, struct zdb_info *db_info,
 		}
 	}
 
-	lock(&cache_mutex);
-	while (!list_empty(&request.node_list)) {
-		__cache_node(list_entry(request.node_list.next, struct node,
-					node_entry));
-	}
-	unlock(&cache_mutex);
+	release_node_list(&request.node_list, err);
 
 	timeout_del(&to_event);
 
@@ -497,12 +528,27 @@ static int zdb_write_chunk(const unsigned char *chunk,
 	return send_request(request, db_info, digest, NULL);
 }
 
+static const char *suffix(const char *str, const char *prefix)
+{
+	int pfxlen = strlen(prefix);
+	if (!strncmp(str, prefix, pfxlen))
+		return str + pfxlen;
+	return NULL;
+}
+
 static int parse_spec(const char *spec, struct zdb_info *zdb_info)
 {
+	static struct addrinfo ai_hint = {
+		.ai_family = AF_INET,
+		.ai_socktype = SOCK_STREAM,
+	};
+
+	struct addrinfo *ai_list;
 	char *addr, *port;
 	char *spec_copy;
 	char *opt;
-	int opt_count;
+	const char *value;
+	int err, opt_count;
 
 	spec_copy = alloca(strlen(spec + 1));
 	if (!spec_copy)
@@ -522,19 +568,38 @@ static int parse_spec(const char *spec, struct zdb_info *zdb_info)
 			}
 			*port++ = 0;
 
-			zdb_info->start_node.sin_family = AF_INET;
-			zdb_info->start_node.sin_port = htons(atoi(port));
+			err = getaddrinfo(addr, port, &ai_hint, &ai_list);
+			if (err) {
+				err = -errno;
+				ERROR("getaddrinfo: %s\n", strerror(errno));
+				return err;
+			}
 
-			if (!inet_aton(addr, &zdb_info->start_node.sin_addr))
+			if (!ai_list) {
+				ERROR("ai_list == NULL\n");
 				return -EINVAL;
+			}
 
-		} else if (!strncmp(opt, "timeout=", 8)) {
-			zdb_info->timeout.tv_sec = atoi(opt + 8);
+			/*
+			 * Just take the first addr for now.
+			 */
+			zdb_info->start_node =
+				*(struct sockaddr_in *)ai_list->ai_addr;
+
+			freeaddrinfo(ai_list);
+
+		} else if ((value = suffix(opt, "timeout="))) {
+			zdb_info->timeout.tv_sec = atoi(value);
 			if (!zdb_info->timeout.tv_sec)
 				return -EINVAL;
 
-		} else if (!strncmp(opt, "concurrency=", 12)) {
-			zdb_info->max_concurrency = atoi(opt + 12);
+		} else if ((value = suffix(opt, "min-concurrency="))) {
+			zdb_info->min_concurrency = atoi(value);
+			if (!zdb_info->min_concurrency)
+				return -EINVAL;
+
+		} else if ((value = suffix(opt, "max-concurrency="))) {
+			zdb_info->max_concurrency = atoi(value);
 			if (!zdb_info->max_concurrency)
 				return -EINVAL;
 
@@ -549,6 +614,11 @@ static int parse_spec(const char *spec, struct zdb_info *zdb_info)
 		return -EINVAL;
 	}
 
+	if (zdb_info->max_concurrency < zdb_info->min_concurrency) {
+		ERROR("max-concurrency < min-concurrency\n");
+		return -EINVAL;
+	}
+
 	return 0;
 }
 
@@ -558,10 +628,9 @@ static struct chunk_db *zdb_chunkdb_ctor(int mode, const char *spec)
 	struct zdb_info *zdb_info;
 	int err;
 
-	if (strncmp(spec, "zunkdb:", 7))
+	spec = suffix(spec, "zunkdb:");
+	if (!spec)
 		return NULL;
-
-	spec += 7;
 
 	cdb = malloc(sizeof(struct chunk_db) + sizeof(struct zdb_info));
 	if (!cdb)
@@ -574,6 +643,7 @@ static struct chunk_db *zdb_chunkdb_ctor(int mode, const char *spec)
 	zdb_info->timeout.tv_usec = 0;
 
 	zdb_info->max_concurrency = -1;
+	zdb_info->min_concurrency = 1;
 
 	cdb->read_chunk = zdb_read_chunk;
 	cdb->write_chunk = (mode == CHUNKDB_RW) ? zdb_write_chunk : NULL;

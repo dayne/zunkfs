@@ -508,6 +508,8 @@ struct dentry *find_dentry_parent(const char *path, struct dentry **pparent,
 	int len;
 
 	assert(root_dentry != NULL && !IS_ERR(root_dentry));
+	assert(pparent != NULL);
+	assert(name != NULL);
 
 	parent = NULL;
 	dentry = root_dentry;
@@ -525,12 +527,8 @@ struct dentry *find_dentry_parent(const char *path, struct dentry **pparent,
 			return dentry;
 		}
 		if (!next) {
-			if (pparent)
-				*pparent = parent;
-			else
-				put_dentry(parent);
-			if (name)
-				*name = path;
+			*pparent = parent;
+			*name = path;
 			return dentry;
 		}
 		put_dentry(parent);
@@ -540,7 +538,7 @@ struct dentry *find_dentry_parent(const char *path, struct dentry **pparent,
 	}
 }
 
-struct dentry *find_dentry_super_secret(const char *path, int *is_super_secret)
+struct dentry *find_dentry(const char *path, int *dir_as_file)
 {
 	struct dentry *dentry;
 	struct dentry *parent;
@@ -553,8 +551,8 @@ struct dentry *find_dentry_super_secret(const char *path, int *is_super_secret)
 		put_dentry(parent);
 		return dentry;
 	}
-	if (!strcmp(name, SUPER_SECRET_FILE)) {
-		*is_super_secret = 1;
+	if (dir_as_file && !strcmp(name, DIR_AS_FILE)) {
+		*dir_as_file = 1;
 		return parent;
 	}
 	put_dentry(parent);
@@ -605,7 +603,7 @@ struct dentry *create_dentry(const char *path, mode_t mode)
 	dentry = find_dentry_parent(path, &parent, &name);
 	if (IS_ERR(dentry))
 		return dentry;
-	if (dentry) {
+	if (dentry || !strcmp(name, DIR_AS_FILE)) {
 		put_dentry(parent);
 		put_dentry(dentry);
 		return ERR_PTR(EEXIST);

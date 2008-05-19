@@ -39,7 +39,7 @@ int main(int argc, char **argv)
 	zunkfs_log_fd = stdout;
 	zunkfs_log_level = 'T';
 
-	err = add_chunkdb(CHUNKDB_RW, "mem:");
+	err = add_chunkdb("rw,mem:");
 	if (err)
 		panic("add_chunkdb: %s\n", strerror(-err));
 
@@ -121,7 +121,7 @@ static void test1(void)
 	struct dentry *bar;
 	int err;
 
-	root = find_dentry("/");
+	root = find_dentry("/", NULL);
 	if (IS_ERR(root))
 		panic("find_dentry(/): %s\n", strerror(PTR_ERR(root)));
 
@@ -178,7 +178,7 @@ static void test2(void)
 		struct dlist *next;
 	} *dlist = NULL, **dtail = &dlist, *d;
 
-	root = find_dentry("/");
+	root = find_dentry("/", NULL);
 	if (IS_ERR(root))
 		panic("find_dentry(/): %s\n", strerror(PTR_ERR(root)));
 
@@ -260,7 +260,7 @@ static void test3(void)
 	struct dentry *bar;
 	int err;
 
-	root = find_dentry("/");
+	root = find_dentry("/", NULL);
 	if (IS_ERR(root))
 		panic("find_dentry(/): %s\n", strerror(PTR_ERR(root)));
 

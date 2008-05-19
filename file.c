@@ -36,9 +36,9 @@ struct open_file *open_file(const char *path)
 {
 	struct dentry *dentry;
 	struct open_file *ofile;
-	int super_secret = 0;
+	int dir_as_file = 0;
 
-	dentry = find_dentry_super_secret(path, &super_secret);
+	dentry = find_dentry(path, &dir_as_file);
 	if (IS_ERR(dentry))
 		return (void *)dentry;
 
@@ -189,7 +189,7 @@ static int rw_file(struct open_file *ofile, char *buf, size_t bufsz,
 }
 
 /*
- * "super-secret" file handling.
+ * "directory-as-a-file" file handling.
  */
 static int write_dir(struct open_file *ofile, const char *buf, size_t len,
 		off_t offset)

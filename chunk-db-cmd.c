@@ -148,8 +148,8 @@ static struct chunk_db_type ext_chunkdb_type = {
 	//       0         1         2         3
 	//       0123456789012345678901234567890
 	.help =
-"   cmd:<command>           <command> is a full to a program which takes a\n"
-"                           chunk hash as its only argument, and outputs\n"
+"   cmd:<command>           <command> is a full path to a program which takes\n"
+"                           a chunk hash as its only argument, and outputs\n"
 "                           the chunk to stdout.\n"
 };
 

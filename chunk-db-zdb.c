@@ -661,7 +661,7 @@ static struct chunk_db_type zdb_chunkdb_type = {
 	//       0         1         2         3
 	//       0123456789012345678901234567890
 	.help =
-"   zunkdb:<node>[,opts]    Use a zunk distributed database for chunk storage.\n"
+"   zunkdb:<node>[,opts]    Use a \"zunk\" database for chunk storage.\n"
 "                           Initial node is passed in as <ip|name>:<port>.\n"
 "                           Options include:\n"
 "                              --min-concurrency=#\n"

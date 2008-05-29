@@ -183,7 +183,7 @@ static struct chunk_db_type map_chunkdb_type = {
 	//       0         1         2         3
 	//       0123456789012345678901234567890
 	.help =
-"   map:<sqlite db>         Use an SQLite database to store mapping between\n"
+"   map:sqlite:<db>         Use an SQLite database to store mapping between\n"
 "                           (path, offset) and chunk hash. The database\n"
 "                           schema is\n"
 "                              CREATE TABLE chunk_map (\n"

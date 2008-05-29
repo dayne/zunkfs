@@ -150,7 +150,7 @@ static struct chunk_db_type ext_chunkdb_type = {
 	.help =
 "   cmd:<command>           <command> is a full path to a program which takes\n"
 "                           a chunk hash as its only argument, and outputs\n"
-"                           the chunk to stdout.\n"
+"                           the chunk to stdout. This method is read-only.\n"
 };
 
 static void __attribute__((constructor)) init_chunkdb_cmd(void)

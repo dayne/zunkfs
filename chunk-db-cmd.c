@@ -16,8 +16,10 @@
 #include "chunk-db.h"
 #include "utils.h"
 
-static int fetch_chunk(unsigned char *chunk, const unsigned char *digest,
-		void *db_info)
+typedef ssize_t (*xfer_fn)(int fd, void *buf, size_t len);
+
+static int xfer_chunk(unsigned char *chunk, const unsigned char *digest,
+		xfer_fn op, int orig_fd, void *db_info)
 {
 	const char *fetch_cmd = db_info;
 	char chunk_name[CHUNK_DIGEST_STRLEN+1];
@@ -54,12 +56,11 @@ static int fetch_chunk(unsigned char *chunk, const unsigned char *digest,
 		close(fd[1]);
 
 		for (len = 0; len < CHUNK_SIZE; ) {
-			n = read(fd[0], chunk + len, CHUNK_SIZE - len);
+			n = op(fd[0], chunk + len, CHUNK_SIZE - len);
 			if (n < 0) {
 				if (errno == EINTR)
 					continue;
 				WARNING("read: %s\n", strerror(errno));
-				err = -errno;
 				close(fd[1]);
 				kill(pid, 9);
 				waitpid(pid, NULL, 0);
@@ -74,14 +75,9 @@ static int fetch_chunk(unsigned char *chunk, const unsigned char *digest,
 		
 		/*
 		 * Don't worry about return values from waitpid(),
-		 * as the chunk is already fetched.
+		 * as the IO is already completed.
 		 */
 		waitpid(pid, &status, 0);
-
-		if (!verify_chunk(chunk, digest)) {
-			ERROR("Chunk failed verification\n");
-			return -EIO;
-		}
 
 		TRACE("len=%d", len);
 
@@ -90,30 +86,41 @@ static int fetch_chunk(unsigned char *chunk, const unsigned char *digest,
 
 	close(fd[0]);
 
-	err = dup2(fd[1], STDOUT_FILENO);
+	err = dup2(fd[1], orig_fd);
 	if (err < 0) {
-		err = errno;
-		ERROR("stdout redirection failed: %s\n", strerror(err));
+		ERROR("stdio redirection failed: %s\n", strerror(errno));
 		exit(-errno);
 	}
 
 	if (zunkfs_log_fd) {
 		err = dup2(fileno(zunkfs_log_fd), STDERR_FILENO);
 		if (err < 0) {
-			err = errno;
-			ERROR("stderr redirection failed: %s\n", strerror(err));
+			ERROR("stderr redirection failed: %s\n",
+					strerror(errno));
 			exit(-errno);
 		}
 	}
 
 	execl(fetch_cmd, fetch_cmd, chunk_name, NULL);
 
-	err = errno;
 	ERROR("\"%s %s\" failed: %s\n", fetch_cmd, chunk_name, strerror(err));
-	exit(-err);
+	exit(-errno);
 
 	/* prevent compiler warnings */
 	return 0;
+}
+
+static int cmd_read_chunk(unsigned char *chunk, const unsigned char *digest,
+		void *db_info)
+{
+	return xfer_chunk(chunk, digest, (xfer_fn)read, STDOUT_FILENO, db_info);
+}
+
+static int cmd_write_chunk(const unsigned char *chunk,
+		const unsigned char *digest, void *db_info)
+{
+	return xfer_chunk((unsigned char *)chunk, digest, 
+			(xfer_fn)write, STDIN_FILENO, db_info);
 }
 
 static struct chunk_db *ext_chunkdb_ctor(int mode, const char *spec)
@@ -123,22 +130,22 @@ static struct chunk_db *ext_chunkdb_ctor(int mode, const char *spec)
 	if (strncmp(spec, "cmd:", 4))
 		return NULL;
 
+	spec += 4;
+
 	TRACE("mode=%d spec=%s\n", mode, spec);
 
-	if (mode != CHUNKDB_RO)
-		return ERR_PTR(EINVAL);
-	if (access(spec + 4, X_OK))
+	if (access(spec, X_OK))
 		return ERR_PTR(EACCES);
 
-	cdb = malloc(sizeof(struct chunk_db) + strlen(spec + 4) + 1);
+	cdb = malloc(sizeof(struct chunk_db) + strlen(spec) + 1);
 	if (!cdb)
 		return ERR_PTR(ENOMEM);
 
 	cdb->db_info = (void *)(cdb + 1);
-	strcpy(cdb->db_info, spec + 4);
+	strcpy(cdb->db_info, spec);
 
-	cdb->read_chunk = fetch_chunk;
-	cdb->write_chunk = NULL;
+	cdb->read_chunk = cmd_read_chunk;
+	cdb->write_chunk = (mode == CHUNKDB_RO) ? NULL : cmd_write_chunk;
 
 	return cdb;
 }
@@ -150,7 +157,7 @@ static struct chunk_db_type ext_chunkdb_type = {
 	.help =
 "   cmd:<command>           <command> is a full path to a program which takes\n"
 "                           a chunk hash as its only argument, and outputs\n"
-"                           the chunk to stdout. This method is read-only.\n"
+"                           the chunk to stdout.\n"
 };
 
 static void __attribute__((constructor)) init_chunkdb_cmd(void)

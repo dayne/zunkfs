@@ -143,8 +143,18 @@ static struct chunk_db *ext_chunkdb_ctor(int mode, const char *spec)
 	return cdb;
 }
 
+static struct chunk_db_type ext_chunkdb_type = {
+	.ctor = ext_chunkdb_ctor,
+	//       0         1         2         3
+	//       0123456789012345678901234567890
+	.help =
+"   cmd:<command>           <command> is a full to a program which takes a\n"
+"                           chunk hash as its only argument, and outputs\n"
+"                           the chunk to stdout.\n"
+};
+
 static void __attribute__((constructor)) init_chunkdb_cmd(void)
 {
-	register_chunkdb(ext_chunkdb_ctor);
+	register_chunkdb(&ext_chunkdb_type);
 }
 

@@ -6,7 +6,8 @@ ifndef LIBEVENT_PREFIX
 endif
 
 LDFLAGS=-lssl -lsqlite3 $(FUSE_LIBS) -L$(LIBEVENT_PREFIX)/lib -levent
-CFLAGS=-g -Wall $(FUSE_CFLAGS) -DZUNKFS_OS=$(OS) -I$(LIBEVENT_PREFIX)/include
+CFLAGS=-g -Wall $(FUSE_CFLAGS) -DZUNKFS_OS=$(OS) -I$(LIBEVENT_PREFIX)/include \
+       -Werror
 OS=$(shell /usr/bin/env uname)
 
 ifdef CHUNK_SIZE

@@ -178,8 +178,23 @@ static struct chunk_db *map_chunkdb_ctor(int mode, const char *spec)
 	return chunk_db;
 }
 
+static struct chunk_db_type map_chunkdb_type = {
+	.ctor = map_chunkdb_ctor,
+	//       0         1         2         3
+	//       0123456789012345678901234567890
+	.help =
+"   map:<sqlite db>         Use an SQLite database to store mapping between\n"
+"                           (path, offset) and chunk hash. The database\n"
+"                           schema is\n"
+"                              CREATE TABLE chunk_map (\n"
+"                                      hash      CHAR(20) PRIMARY KEY,\n"
+"                                      path      VARCHAR(1024),\n"
+"                                      chunk_nr INTEGER\n"
+"                              );\n"
+};
+
 static __attribute__((constructor)) void map_chunkdb_init(void)
 {
-	register_chunkdb(map_chunkdb_ctor);
+	register_chunkdb(&map_chunkdb_type);
 }
 

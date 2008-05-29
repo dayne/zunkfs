@@ -411,10 +411,20 @@ static const char *prog = NULL;
 static void usage(void)
 {
 	/* FIXME: Need to play nicely with FUSE's --help. */
-	fprintf(stderr, "Usage: %s [options] root_ddent mountpt\n", prog);
-	fprintf(stderr, "\t--log=[level,]<file|stderr|stdout>\n");
-	fprintf(stderr, "\t\tlevel is one of (E)rror, (W)arning, (T)race\n");
-	fprintf(stderr, "\t--chunk-db=<rw|ro>,<dbspec>\n");
+	fprintf(stderr,
+"usage: %s [options] root_ddent mountpt [mount options]\n"
+"zunkfs options:\n"
+"   --log=[level,]<file>    Log zunkfs events. Level is one of (E)rror,\n"
+"                           (W)arning, or (T)race. File can be a file,\n"
+"                           stdout, or stderr.\n"
+"   --chunk-db=<spec>       Add chunk storage. The spec consists of\n"
+"                           <mode>,<db info>. Mode is either ro or rw.\n"
+"                           rw can be prefixed with wt. When writing, zunkfs\n"
+"                           will stop at the first writable db, unless the db\n"
+"                           is marked as write-through (wt).\n"
+"\n"
+"Available chunk databases:\n", prog);
+	help_chunkdb();
 	fprintf(stderr, "\n");
 }
 
@@ -427,7 +437,9 @@ static int opt_proc(void *data, const char *arg, int key,
 	switch(key) {
 	case OPT_HELP:
 		usage();
-		return 1;
+		if (fuse_opt_insert_arg(args, 1, "-ho"))
+			return -1;
+		return 0;
 	case OPT_LOG:
 		if (zunkfs_log_fd) {
 			fprintf(stderr, "Log file specified more than once.\n");
@@ -449,8 +461,12 @@ static int opt_proc(void *data, const char *arg, int key,
 		return 0;
 	case OPT_CHUNK_DB:
 		arg += 11;
-		err = add_chunkdb(arg);
-		if (err) {
+		switch((err = add_chunkdb(arg))) {
+		case -EINVAL:
+			return -1;
+		case 0:
+			break;
+		default:
 			fprintf(stderr, "Failed to add chunkdb %s: %s\n", arg,
 					strerror(-err));
 			return -1;
@@ -480,6 +496,7 @@ int main(int argc, char **argv)
 	err = fuse_main(args.argc, args.argv, &zunkfs_operations, NULL);
 	if (!err)
 		flush_root();
+
 	return err;
 }
 

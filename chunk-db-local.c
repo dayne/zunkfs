@@ -127,8 +127,15 @@ static struct chunk_db *local_chunkdb_ctor(int mode, const char *spec)
 	return cdb;
 }
 
+static struct chunk_db_type local_chunkdb_type = {
+	.ctor = local_chunkdb_ctor,
+	//       0         1         2         3
+	//       0123456789012345678901234567890
+	.help = "   dir:<path>              Chunks are store in specified directory.\n"
+};
+
 static void __attribute__((constructor)) init_chunkdb_local(void)
 {
-	register_chunkdb(local_chunkdb_ctor);
+	register_chunkdb(&local_chunkdb_type);
 }
 

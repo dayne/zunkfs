@@ -84,8 +84,17 @@ static struct chunk_db *mem_chunkdb_ctor(int mode, const char *spec)
 	return cdb;
 }
 
+static struct chunk_db_type mem_chunkdb_type = {
+	.ctor = mem_chunkdb_ctor,
+	//       0         1         2         3
+	//       0123456789012345678901234567890
+	.help =
+"   mem:                    Dummy chunk database that stores all chunks in \n"
+"                           memory.\n"
+};
+
 static void __attribute__((constructor)) init_chunkdb_mem(void)
 {
-	register_chunkdb(mem_chunkdb_ctor);
+	register_chunkdb(&mem_chunkdb_type);
 }
 

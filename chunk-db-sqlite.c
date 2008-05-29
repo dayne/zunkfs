@@ -135,8 +135,6 @@ static struct chunk_db *sqlite_chunkdb_ctor(int mode, const char *spec)
 
 static struct chunk_db_type sqlite_chunkdb_type = {
 	.ctor = sqlite_chunkdb_ctor,
-	//       0         1         2         3
-	//       0123456789012345678901234567890
 	.help =
 "   sqlite:<database>       SQLite storage for chunks. Database schema:\n"
 "                              CREATE TABLE chunk (\n"

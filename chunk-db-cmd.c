@@ -123,7 +123,7 @@ static int cmd_write_chunk(const unsigned char *chunk,
 			(xfer_fn)write, STDIN_FILENO, db_info);
 }
 
-static struct chunk_db *ext_chunkdb_ctor(int mode, const char *spec)
+static struct chunk_db *cmd_chunkdb_ctor(int mode, const char *spec)
 {
 	struct chunk_db *cdb;
 
@@ -150,10 +150,8 @@ static struct chunk_db *ext_chunkdb_ctor(int mode, const char *spec)
 	return cdb;
 }
 
-static struct chunk_db_type ext_chunkdb_type = {
-	.ctor = ext_chunkdb_ctor,
-	//       0         1         2         3
-	//       0123456789012345678901234567890
+static struct chunk_db_type cmd_chunkdb_type = {
+	.ctor = cmd_chunkdb_ctor,
 	.help =
 "   cmd:<command>           <command> is a full path to a program which takes\n"
 "                           a chunk hash as its only argument, and outputs\n"
@@ -162,6 +160,6 @@ static struct chunk_db_type ext_chunkdb_type = {
 
 static void __attribute__((constructor)) init_chunkdb_cmd(void)
 {
-	register_chunkdb(&ext_chunkdb_type);
+	register_chunkdb(&cmd_chunkdb_type);
 }
 

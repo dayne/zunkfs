@@ -180,8 +180,6 @@ static struct chunk_db *map_chunkdb_ctor(int mode, const char *spec)
 
 static struct chunk_db_type map_chunkdb_type = {
 	.ctor = map_chunkdb_ctor,
-	//       0         1         2         3
-	//       0123456789012345678901234567890
 	.help =
 "   map:sqlite:<db>         Use an SQLite database to store mapping between\n"
 "                           (path, offset) and chunk hash. The database\n"

@@ -129,8 +129,6 @@ static struct chunk_db *local_chunkdb_ctor(int mode, const char *spec)
 
 static struct chunk_db_type local_chunkdb_type = {
 	.ctor = local_chunkdb_ctor,
-	//       0         1         2         3
-	//       0123456789012345678901234567890
 	.help =
 "   dir:<path>              Chunks are stored in specified directory.\n"
 };

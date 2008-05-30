@@ -122,7 +122,7 @@ static struct chunk_db *local_chunkdb_ctor(int mode, const char *spec)
 	strcpy(cdb->db_info, spec+4);
 
 	cdb->read_chunk = local_read_chunk;
-	cdb->write_chunk = (mode == CHUNKDB_RW) ? local_write_chunk : NULL;
+	cdb->write_chunk = (mode == CHUNKDB_RO) ? NULL : local_write_chunk;
 
 	return cdb;
 }

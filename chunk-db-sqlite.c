@@ -128,7 +128,7 @@ static struct chunk_db *sqlite_chunkdb_ctor(int mode, const char *spec)
 	}
 
 	cdb->read_chunk = read_chunk_sqlite;
-	cdb->write_chunk = (mode == CHUNKDB_RW) ? write_chunk_sqlite : NULL;
+	cdb->write_chunk = (mode == CHUNKDB_RO) ? NULL : write_chunk_sqlite;
 
 	return cdb;
 }

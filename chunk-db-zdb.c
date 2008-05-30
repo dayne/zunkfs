@@ -646,7 +646,7 @@ static struct chunk_db *zdb_chunkdb_ctor(int mode, const char *spec)
 	zdb_info->min_concurrency = 1;
 
 	cdb->read_chunk = zdb_read_chunk;
-	cdb->write_chunk = (mode == CHUNKDB_RW) ? zdb_write_chunk : NULL;
+	cdb->write_chunk = (mode == CHUNKDB_RO) ? NULL : zdb_write_chunk;
 
 	err = parse_spec(spec, zdb_info);
 	if (!err)

@@ -112,7 +112,7 @@ static struct chunk_db *mem_chunkdb_ctor(int mode, const char *spec)
 	}
 
 	cdb->read_chunk = mem_read_chunk;
-	cdb->write_chunk = mem_write_chunk;
+	cdb->write_chunk = (mode == CHUNKDB_RO) ? NULL : mem_write_chunk;
 
 	return cdb;
 }

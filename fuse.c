@@ -43,18 +43,32 @@ static int zunkfs_getattr(const char *path, struct stat *stbuf)
 
 	lock(&dentry->mutex);
 
+	/*
+	 * secret_digest does not change during the lifetime
+	 * of a dentry, and it's supposed to be random.
+	 * Hopefully that's good enough to generate a unique
+	 * inode number.
+	 */
 	memcpy(&stbuf->st_ino, dentry->ddent->secret_digest, sizeof(ino_t));
+
 	stbuf->st_mode = dentry->ddent->mode;
+
+	/* hardlinks aren't supported */
 	stbuf->st_nlink = 1;
+
+	/* same for different users and groups */
 	stbuf->st_uid = getuid();
 	stbuf->st_gid = getgid();
+
 	stbuf->st_size = dentry->size;
 	stbuf->st_atime = dentry->mtime;
 	stbuf->st_mtime = dentry->mtime;
 	stbuf->st_ctime = dentry->ddent->ctime;
+
 	stbuf->st_blksize = 4096;
 	stbuf->st_blocks = (dentry->size + 4095) / 4096;
 
+	/* directory should really be treated as a file... */
 	if (dir_as_file) {
 		stbuf->st_mode &= ~S_IFDIR;
 		stbuf->st_mode |= S_IFREG;
@@ -92,7 +106,10 @@ static int zunkfs_readdir(const char *path, void *filldir_buf,
 			filldir(filldir_buf, "..", NULL, 0))
 		goto out;
 
-	/* racy, but should be OK */
+	/*
+	 * Hack to reduce the number of chunk node teardowns.
+	 * It really should belong in dir.c
+	 */
 	prev = NULL;
 	for (i = 0; ; i ++) {
 		child = get_nth_dentry(dentry, i);

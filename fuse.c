@@ -272,7 +272,7 @@ static int zunkfs_rmdir(const char *path)
 
 	err = -EBUSY;
 	if (dentry->size)
-		put_dentry(dentry);
+		goto out;
 
 	err = del_dentry(dentry);
 out:

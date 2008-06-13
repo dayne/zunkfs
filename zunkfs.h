@@ -20,6 +20,9 @@ int read_chunk(unsigned char *chunk, const unsigned char *digest);
 void zero_chunk_digest(unsigned char *digest);
 int random_chunk_digest(unsigned char *digest);
 
+extern void (*mangle_chunk)(const unsigned char *src, unsigned char *dst);
+extern void (*demangle_chunk)(const unsigned char *src, unsigned char *dst);
+
 static inline int verify_chunk(const unsigned char *chunk,
 		const unsigned char *digest)
 {

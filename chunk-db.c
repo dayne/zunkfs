@@ -98,6 +98,9 @@ void help_chunkdb(void)
 			fprintf(stderr, "%s\n", type->help);
 }
 
+void (*mangle_chunk)(const unsigned char *src, unsigned char *dst) = NULL;
+void (*demangle_chunk)(const unsigned char *src, unsigned char *dst) = NULL;
+
 int read_chunk(unsigned char *chunk, const unsigned char *digest)
 {
 	struct chunk_db *cdb;
@@ -122,13 +125,25 @@ cache_chunk:
 			cdb->write_chunk(chunk, digest, cdb->db_info);
 	}
 
+	if (demangle_chunk)
+		demangle_chunk(chunk, chunk);
+
 	return len;
 }
 
 int write_chunk(const unsigned char *chunk, unsigned char *digest)
 {
+	unsigned char *tmp_chunk;
 	struct chunk_db *cdb;
 	int n, ret;
+
+	if (mangle_chunk) {
+		tmp_chunk = alloca(CHUNK_SIZE);
+		if (!tmp_chunk)
+			return -ENOMEM;
+		mangle_chunk(chunk, tmp_chunk);
+		chunk = tmp_chunk;
+	}
 
 	digest_chunk(chunk, digest);
 

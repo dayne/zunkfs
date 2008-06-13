@@ -28,60 +28,44 @@ static inline unsigned dentry_index(const struct dentry *dentry)
 		(struct disk_dentry *)dentry->ddent_cnode->chunk_data;
 }
 
-static int read_dentry_chunk(unsigned char *chunk, const unsigned char *digest)
+static void demangle_dentry_chunk(const unsigned char *src, unsigned char *dst)
 {
 	const struct chunk_node *cnode;
 	const struct dentry *dentry;
-	int i, err;
+	int i;
 
-	cnode = container_of(chunk, struct chunk_node, chunk_data);
+	cnode = container_of(src, struct chunk_node, chunk_data);
 	dentry = container_of(cnode->ctree, struct dentry, chunk_tree);
 
 	assert(dentry->secret_chunk != NULL);
 
-	/*
-	 * Chunk will be empty, so nothing to read.
-	 */
 	if (!dentry->size)
-		return 0;
-
-	err = read_chunk(chunk, digest);
-	if (err < 0)
-		return err;
+		return;
 
 	for (i = 0; i < CHUNK_SIZE; i ++)
-		chunk[i] ^= dentry->secret_chunk[i];
-
-	return err;
+		dst[i] = src[i] ^ dentry->secret_chunk[i];
 }
 
-static int write_dentry_chunk(const unsigned char *chunk, unsigned char *digest)
+void mangle_dentry_chunk(const unsigned char *src, unsigned char *dst)
 {
 	const struct chunk_node *cnode;
 	const struct dentry *dentry;
-	unsigned char real_chunk[CHUNK_SIZE];
-	int i, err;
+	int i;
 
-	cnode = container_of(chunk, struct chunk_node, chunk_data);
+	cnode = container_of(src, struct chunk_node, chunk_data);
 	dentry = container_of(cnode->ctree, struct dentry, chunk_tree);
 
 	assert(dentry->secret_chunk != NULL);
 
 	for (i = 0; i < CHUNK_SIZE; i ++)
-		real_chunk[i] = chunk[i] ^ dentry->secret_chunk[i];
-
-	err = write_chunk(real_chunk, digest);
-	if (err < 0)
-		return err;
-
-	return err;
+		dst[i] = src[i] ^ dentry->secret_chunk[i];
 }
 
-static struct chunk_tree_operations dentry_ctree_ops = {
-	.free_private = free,
-	.read_chunk   = read_dentry_chunk,
-	.write_chunk  = write_dentry_chunk,
-};
+static void __attribute__((constructor)) set_dentry_manglers(void)
+{
+	mangle_chunk = mangle_dentry_chunk;
+	demangle_chunk = demangle_dentry_chunk;
+}
 
 static struct dentry *new_dentry(struct dentry *parent,
 		struct disk_dentry *ddent, struct chunk_node *ddent_cnode,
@@ -158,7 +142,7 @@ struct chunk_node *get_dentry_chunk(struct dentry *dentry, unsigned chunk_nr)
 			return ERR_PTR(-err);
 		err = init_chunk_tree(&dentry->chunk_tree,
 				ddent_chunk_count(dentry->ddent),
-				dentry->ddent->digest, &dentry_ctree_ops);
+				dentry->ddent->digest);
 		if (err < 0)
 			return ERR_PTR(-err);
 	}

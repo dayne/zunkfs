@@ -21,6 +21,44 @@ static const char spaces[] = "                                                  
 static unsigned char rand_digest[CHUNK_DIGEST_LEN];
 static unsigned char rand_chunk[CHUNK_SIZE];
 
+static int test_read_chunk(unsigned char *chunk, const unsigned char *digest)
+{
+	int i, err;
+
+	printf("test_read_chunk: %s\n", digest_string(digest));
+
+	err = read_chunk(chunk, digest);
+	if (err < 0)
+		return err;
+
+	for (i = 0; i < CHUNK_SIZE; i ++)
+		chunk[i] ^= rand_chunk[i];
+
+	return err;
+}
+
+static int test_write_chunk(const unsigned char *chunk, unsigned char *digest)
+{
+	unsigned char real_chunk[CHUNK_SIZE];
+	int i, err;
+
+	for (i = 0; i < CHUNK_SIZE; i ++)
+		real_chunk[i] = chunk[i] ^ rand_chunk[i];
+
+	err = write_chunk(real_chunk, digest);
+	if (err < 0)
+		return err;
+
+	printf("test_write_chunk: %s\n", digest_string(digest));
+	return err;
+}
+
+struct chunk_tree_operations ctree_ops = {
+	.free_private = free,
+	.read_chunk   = test_read_chunk,
+	.write_chunk  = test_write_chunk,
+};
+
 int main(int argc, char **argv)
 {
 	struct chunk_tree ctree;
@@ -45,7 +83,7 @@ int main(int argc, char **argv)
 
 	memcpy(root_digest, rand_digest, CHUNK_DIGEST_LEN);
 
-	err = init_chunk_tree(&ctree, 1, root_digest);
+	err = init_chunk_tree(&ctree, 1, root_digest, &ctree_ops);
 	if (err)
 		panic("init_chunk_tree: %s\n", strerror(-err));
 

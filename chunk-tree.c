@@ -141,7 +141,8 @@ again:
 			memset(cnode->chunk_data, 0, CHUNK_SIZE);
 			cnode->dirty = 1;
 		} else {
-			err = read_chunk(cnode->chunk_data, cnode->chunk_digest);
+			err = ctree->ops->read_chunk(cnode->chunk_data,
+					cnode->chunk_digest);
 			if (err < 0) {
 				free(cnode);
 				return ERR_PTR(-err);
@@ -172,7 +173,8 @@ static int flush_chunk_node(struct chunk_node *cnode)
 	int err;
 
 	if (cnode->dirty) {
-		err = write_chunk(cnode->chunk_data, cnode->chunk_digest);
+		err = cnode->ctree->ops->write_chunk(cnode->chunk_data,
+				cnode->chunk_digest);
 		if (err < 0)
 			return err;
 		if (cnode->parent)
@@ -185,6 +187,7 @@ static int flush_chunk_node(struct chunk_node *cnode)
 
 static void __put_chunk_node(struct chunk_node *cnode, int leaf)
 {
+	struct chunk_tree *ctree = cnode->ctree;
 	struct chunk_node *parent;
 	int err;
 
@@ -198,7 +201,12 @@ static void __put_chunk_node(struct chunk_node *cnode, int leaf)
 					strerror(-err));
 		}
 
-		free(cnode->_private);
+		if (cnode->_private) {
+			if (leaf)
+				ctree->ops->free_private(cnode->_private);
+			else
+				free(cnode->_private);
+		}
 
 		parent = cnode->parent;
 		assert(parent != NULL);
@@ -217,7 +225,7 @@ void put_chunk_node(struct chunk_node *cnode)
 }
 
 int init_chunk_tree(struct chunk_tree *ctree, unsigned nr_leafs,
-		unsigned char *root_digest)
+		unsigned char *root_digest, struct chunk_tree_operations *ops)
 {
 	struct chunk_node *root;
 	unsigned nr;
@@ -226,6 +234,7 @@ int init_chunk_tree(struct chunk_tree *ctree, unsigned nr_leafs,
 	if (!root_digest)
 		return -EINVAL;
 
+	ctree->ops = ops;
 	ctree->nr_leafs = nr_leafs;
 	ctree->height = 0;
 
@@ -246,7 +255,7 @@ int init_chunk_tree(struct chunk_tree *ctree, unsigned nr_leafs,
 	if (IS_ERR(root))
 		return -PTR_ERR(root);
 
-	err = read_chunk(root->chunk_data, root_digest);
+	err = ctree->ops->read_chunk(root->chunk_data, root_digest);
 	if (err < 0) {
 		free(root);
 		return err;
@@ -265,7 +274,8 @@ void free_chunk_tree(struct chunk_tree *ctree)
 	assert(croot->ref_count == 1);
 	if (croot->dirty)
 		flush_chunk_node(croot);
-	free(croot->_private);
+	if (croot->_private)
+		free(croot->_private);
 	free(croot);
 }
 

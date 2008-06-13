@@ -166,7 +166,7 @@ struct chunk_node *get_dentry_chunk(struct dentry *dentry, unsigned chunk_nr)
 	return get_nth_chunk(&dentry->chunk_tree, chunk_nr);
 }
 
-static struct dentry *__get_nth_dentry(struct dentry *parent, unsigned nr)
+static struct dentry *get_nth_dentry(struct dentry *parent, unsigned nr)
 {
 	struct dentry *dentry;
 	struct disk_dentry *ddent;
@@ -215,22 +215,6 @@ got_dentry:
 	return dentry;
 error:
 	put_chunk_node(cnode);
-	return dentry;
-}
-
-struct dentry *get_nth_dentry(struct dentry *parent, unsigned nr)
-{
-	struct dentry *dentry;
-
-	if (!S_ISDIR(parent->ddent->mode))
-		return ERR_PTR(ENOTDIR);
-	if (nr >= parent->size)
-		return ERR_PTR(ENOENT);
-
-	lock(&parent->mutex);
-	dentry = __get_nth_dentry(parent, nr);
-	unlock(&parent->mutex);
-
 	return dentry;
 }
 
@@ -347,7 +331,7 @@ static struct dentry *lookup(struct dentry *parent, const char *name, int len)
 	}
 
 	for (nr = 0; nr < parent->size; nr ++) {
-		dentry = __get_nth_dentry(parent, nr);
+		dentry = get_nth_dentry(parent, nr);
 		if (IS_ERR(dentry))
 			goto out;
 		if (!namcmp(dentry->ddent->name, name, len) &&
@@ -388,7 +372,7 @@ struct dentry *add_dentry(struct dentry *parent, const char *name, mode_t mode)
 		return ERR_PTR(EEXIST);
 	}
 
-	dentry = __get_nth_dentry(parent, parent->size);
+	dentry = get_nth_dentry(parent, parent->size);
 	if (IS_ERR(dentry))
 		return dentry;
 
@@ -454,7 +438,7 @@ static int make_last_dentry(struct dentry *dentry, struct dentry *parent)
 	assert(have_mutex(&parent->mutex));
 
 	if (parent->size > 1) {
-		struct dentry *tmp = __get_nth_dentry(parent, parent->size - 1);
+		struct dentry *tmp = get_nth_dentry(parent, parent->size - 1);
 		if (IS_ERR(tmp))
 			return -PTR_ERR(tmp);
 		if (tmp != dentry)
@@ -676,7 +660,7 @@ static int __rename_dentry(struct dentry *dentry, const char *new_name,
 	tmp = lock_order(old_parent, new_parent);
 	if (tmp == new_parent) {
 		lock(&new_parent->mutex);
-		shadow = __get_nth_dentry(new_parent, new_parent->size);
+		shadow = get_nth_dentry(new_parent, new_parent->size);
 		if (IS_ERR(shadow)) {
 			unlock(&new_parent->mutex);
 			return -PTR_ERR(shadow);
@@ -712,7 +696,7 @@ static int __rename_dentry(struct dentry *dentry, const char *new_name,
 		}
 
 		lock(&new_parent->mutex);
-		shadow = __get_nth_dentry(new_parent, new_parent->size);
+		shadow = get_nth_dentry(new_parent, new_parent->size);
 		if (IS_ERR(shadow)) {
 			unlock(&old_parent->mutex);
 			unlock(&new_parent->mutex);
@@ -761,4 +745,50 @@ void dentry_chmod(struct dentry *dentry, mode_t mode)
 	unlock(dentry->ddent_mutex);
 }
 
+int scan_dir(struct dentry *dentry, int (*func)(struct dentry *, void *),
+		void *scan_data)
+{
+	struct dentry *child;
+	struct dentry *last;
+	unsigned i;
+	int err;
+
+	if (!S_ISDIR(dentry->ddent->mode))
+		return -ENOTDIR;
+
+	/*
+	 * Avoid constant build-up and tear-down of dir's chunk tree
+	 * by caching the previous child dentry.
+	 */
+	last = NULL;
+	err = 0;
+
+	lock(&dentry->mutex);
+	for (i = 0; i < dentry->size; i ++) {
+		child = get_nth_dentry(dentry, i);
+		if (IS_ERR(child))
+			goto error;
+
+		unlock(&dentry->mutex);
+		err = func(child, scan_data);
+		lock(&dentry->mutex);
+
+		if (err)
+			goto out;
+
+		if (last)
+			__put_dentry(last);
+		last = child;
+	}
+out:
+	if (last)
+		__put_dentry(last);
+	unlock(&dentry->mutex);
+	return err;
+error:
+	err = -PTR_ERR(child);
+	if (err == -ENOENT)
+		err = 0;
+	goto out;
+}
 

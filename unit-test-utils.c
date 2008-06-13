@@ -76,10 +76,18 @@ void dump_dentry(struct dentry *dentry, const char *indent)
 	dump_ctree(&dentry->chunk_tree, indent, dump_dentries);
 }
 
+void dump_dentry_2(struct dentry *dentry, const char *indent);
+
+static int dump_child(struct dentry *child, void *data)
+{
+	const char *indent = data;
+	dump_dentry_2(child, indent);
+	return 0;
+}
+
 void dump_dentry_2(struct dentry *dentry, const char *indent)
 {
-	struct dentry *child;
-	int i;
+	int err;
 
 	if (!dentry)
 		return;
@@ -96,17 +104,13 @@ void dump_dentry_2(struct dentry *dentry, const char *indent)
 	if (!S_ISDIR(dentry->ddent->mode))
 		return;
 
-	for (i = 0; i < dentry->size; i ++) {
-		child = get_nth_dentry(dentry, i);
-		if (IS_ERR(child)) {
-			fprintf(stderr, "PANIC: get_nth_dentry(%p, %d): %s\n",
-					dentry, i, strerror(PTR_ERR(child)));
-			dump_ctree(&dentry->chunk_tree, indent, dump_dentries);
-			fflush(stdout);
-			abort();
-		}
-		dump_dentry_2(child, indent - 1);
-		put_dentry(child);
+	err = scan_dir(dentry, dump_child, (void *)(indent - 1));
+	if (err) {
+		fprintf(stderr, "PANIC: scan_dir(%p): %s\n",
+				dentry, strerror(-err));
+		dump_ctree(&dentry->chunk_tree, indent, dump_dentries);
+		fflush(stdout);
+		abort();
 	}
 }
 

@@ -81,17 +81,33 @@ static int zunkfs_getattr(const char *path, struct stat *stbuf)
 	return 0;
 }
 
+struct filldir_data {
+	fuse_fill_dir_t func;
+	void *buf;
+};
+
+static int zunkfs_filldir(struct dentry *dentry, void *data)
+{
+	struct filldir_data *fdd = data;
+
+	if (fdd->func(fdd->buf, (char *)dentry->ddent->name, NULL, 0))
+		return -ENOBUFS;
+
+	return 0;
+}
+
 static int zunkfs_readdir(const char *path, void *filldir_buf,
 		fuse_fill_dir_t filldir, off_t offset,
 		struct fuse_file_info *fuse_file)
 {
+	struct filldir_data fdd;
 	struct dentry *dentry;
-	struct dentry *child;
-	struct dentry *prev;
-	unsigned i;
 	int err;
 
-	TRACE("%s\n", path);
+	TRACE("path=%s offset=%llu\n", path, offset);
+
+	if (offset)
+		return -EINVAL;
 
 	dentry = find_dentry(path, NULL);
 	if (IS_ERR(dentry))
@@ -106,32 +122,11 @@ static int zunkfs_readdir(const char *path, void *filldir_buf,
 			filldir(filldir_buf, "..", NULL, 0))
 		goto out;
 
-	/*
-	 * Hack to reduce the number of chunk node teardowns.
-	 * It really should belong in dir.c
-	 */
-	prev = NULL;
-	for (i = 0; ; i ++) {
-		child = get_nth_dentry(dentry, i);
-		if (IS_ERR(child)) {
-			err = -PTR_ERR(child);
-			if (err == -ENOENT)
-				err = 0;
-			goto out;
-		}
-		TRACE("%s\n", (char *)child->ddent->name);
-		if (filldir(filldir_buf, (char *)child->ddent->name, NULL, 0)) {
-			err = -ENOBUFS;
-			put_dentry(child);
-			goto out;
-		}
-		if (prev)
-			put_dentry(prev);
-		prev = child;
-	}
+	fdd.func = filldir;
+	fdd.buf = filldir_buf;
+
+	err = scan_dir(dentry, zunkfs_filldir, &fdd);
 out:
-	if (prev)
-		put_dentry(prev);
 	put_dentry(dentry);
 	return err;
 }

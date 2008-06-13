@@ -70,8 +70,6 @@ struct dentry {
 	time_t mtime;
 };
 
-struct dentry *get_nth_dentry(struct dentry *parent, unsigned nr);
-
 void __put_dentry(struct dentry *dentry);
 void put_dentry(struct dentry *dentry);
 
@@ -93,6 +91,9 @@ void dentry_chmod(struct dentry *dentry, mode_t mode);
 
 int set_root(struct disk_dentry *ddent, struct mutex *ddent_mutex);
 void flush_root(void);
+
+int scan_dir(struct dentry *dentry, int (*func)(struct dentry *, void *),
+		void *scan_data);
 
 #endif
 

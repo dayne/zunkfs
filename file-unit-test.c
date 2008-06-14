@@ -141,9 +141,9 @@ read_again3:
 	}
 
 	printf("size=%"PRIu64" nr_leafs=%u height=%u\n",
-			ofile->dentry->size,
-			ofile->dentry->chunk_tree.nr_leafs,
-			ofile->dentry->chunk_tree.height);
+			file_dentry(ofile)->size,
+			file_dentry(ofile)->chunk_tree.nr_leafs,
+			file_dentry(ofile)->chunk_tree.height);
 
 	err = close_file(ofile);
 	if (err < 0)

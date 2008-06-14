@@ -16,6 +16,20 @@
 #include "file.h"
 #include "dir.h"
 
+#define MIN_FILE_CHUNK_CACHE_SIZE	16
+
+#if CHUNK_SIZE > 4096
+#define FILE_CHUNK_CACHE_SIZE	(MIN_FILE_CHUNK_CACHE_SIZE * CHUNK_SIZE / 4096)
+#else
+#define FILE_CHUNK_CACHE_SIZE	MIN_FILE_CHUNK_CACHE_SIZE
+#endif
+
+struct open_file {
+	struct dentry *dentry;
+	struct chunk_node *ccache[FILE_CHUNK_CACHE_SIZE];
+	unsigned ccache_index;
+};
+
 #define lock_file(of)  lock(&(of)->dentry->mutex)
 #define unlock_file(of)  unlock(&(of)->dentry->mutex)
 #define assert_file_locked(of) assert(have_mutex(&(of)->dentry->mutex))
@@ -261,3 +275,9 @@ int write_file(struct open_file *ofile, const char *buf, size_t len, off_t off)
 
 	return retv;
 }
+
+struct dentry *file_dentry(struct open_file *ofile)
+{
+	return ofile->dentry;
+}
+

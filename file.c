@@ -24,6 +24,8 @@
 #define FILE_CHUNK_CACHE_SIZE	MIN_FILE_CHUNK_CACHE_SIZE
 #endif
 
+#define CACHED_CHUNK_MAGIC	((void *)0xf0f0f0f0)
+
 struct open_file {
 	struct dentry *dentry;
 	struct chunk_node *ccache[FILE_CHUNK_CACHE_SIZE];
@@ -33,6 +35,25 @@ struct open_file {
 #define lock_file(of)  lock(&(of)->dentry->mutex)
 #define unlock_file(of)  unlock(&(of)->dentry->mutex)
 #define assert_file_locked(of) assert(have_mutex(&(of)->dentry->mutex))
+
+static inline void set_cached(struct chunk_node *cnode)
+{
+	assert(cnode->_private == NULL);
+	cnode->_private = CACHED_CHUNK_MAGIC;
+}
+
+static inline void clear_cached(struct chunk_node *cnode)
+{
+	assert(cnode->_private == CACHED_CHUNK_MAGIC);
+	cnode->_private = NULL;
+}
+
+static inline int is_cached(struct chunk_node *cnode)
+{
+	assert(cnode->_private == CACHED_CHUNK_MAGIC ||
+			cnode->_private == NULL);
+	return cnode->_private == CACHED_CHUNK_MAGIC;
+}
 
 static struct open_file *open_file_dentry(struct dentry *dentry)
 {
@@ -84,14 +105,17 @@ struct open_file *create_file(const char *path, mode_t mode)
 
 static void release_cached_chunks(struct open_file *ofile)
 {
+	struct chunk_node *cnode;
 	int i;
 
 	assert_file_locked(ofile);
 
 	for (i = 0; i < FILE_CHUNK_CACHE_SIZE; i ++) {
-		if (ofile->ccache[i]) {
-			put_chunk_node(ofile->ccache[i]);
+		cnode = ofile->ccache[i];
+		if (cnode) {
+			clear_cached(cnode);
 			ofile->ccache[i] = NULL;
+			put_chunk_node(cnode);
 		}
 	}
 }
@@ -127,16 +151,26 @@ int flush_file(struct open_file *ofile)
 	return retv;
 }
 
-static void cache_file_chunk(struct open_file *ofile, struct chunk_node *cnode)
+static void __cache_file_chunk(struct open_file *ofile, struct chunk_node *cnode)
 {
 	unsigned index;
 
 	assert_file_locked(ofile);
 
 	index = ofile->ccache_index++ % FILE_CHUNK_CACHE_SIZE;
-	if (ofile->ccache[index])
+	if (ofile->ccache[index]) {
+		clear_cached(ofile->ccache[index]);
 		put_chunk_node(ofile->ccache[index]);
+	}
+
+	set_cached(cnode);
 	ofile->ccache[index] = cnode;
+}
+
+static inline void cache_file_chunk(struct open_file *ofile, struct chunk_node *cnode)
+{
+	if (!is_cached(cnode))
+		__cache_file_chunk(ofile, cnode);
 }
 
 static int rw_file(struct open_file *ofile, char *buf, size_t bufsz,

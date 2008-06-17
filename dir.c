@@ -792,3 +792,23 @@ error:
 	goto out;
 }
 
+int dup_disk_dentry(struct dentry *parent, const struct disk_dentry *src)
+{
+	struct disk_dentry *dst;
+	struct dentry *dentry;
+
+	dentry = add_dentry(parent, (char *)src->name, src->mode);
+	if (IS_ERR(dentry))
+		return -PTR_ERR(dentry);
+
+	dst = dentry->ddent;
+	memcpy(dst->digest, src->digest, CHUNK_DIGEST_LEN);
+	memcpy(dst->secret_digest, src->secret_digest, CHUNK_DIGEST_LEN);
+
+	dentry->size = src->size;
+	dentry->dirty = 1;
+
+	__put_dentry(dentry);
+	return 0;
+}
+

@@ -95,5 +95,7 @@ void flush_root(void);
 int scan_dir(struct dentry *dentry, int (*func)(struct dentry *, void *),
 		void *scan_data);
 
+int dup_disk_dentry(struct dentry *parent, const struct disk_dentry *src);
+
 #endif
 

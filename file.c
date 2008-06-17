@@ -223,12 +223,9 @@ static int rw_file(struct open_file *ofile, char *buf, size_t bufsz,
 	}
 
 	if (!read) {
-		if ((len + offset) > file_size) {
-			file_size = len + offset;
-			if (S_ISDIR(ofile->dentry->ddent->mode))
-				file_size /= sizeof(struct disk_dentry);
-			ofile->dentry->size = file_size;
-		}
+		assert(!S_ISDIR(ofile->dentry->ddent->mode));
+		if ((len + offset) > file_size)
+			ofile->dentry->size = len + offset;
 		ofile->dentry->mtime = time(NULL);
 		ofile->dentry->dirty = 1;
 	}
@@ -242,10 +239,9 @@ static int rw_file(struct open_file *ofile, char *buf, size_t bufsz,
 static int write_dir(struct open_file *ofile, const char *buf, size_t len,
 		off_t offset)
 {
-	const struct disk_dentry *new_ddent;
-	struct disk_dentry *ddent;
-	struct dentry *dentry;
+	const struct disk_dentry *ddent;
 	size_t total = 0;
+	int err;
 
 	TRACE("len=%zu off=%zu\n", len, (size_t)offset);
 
@@ -257,28 +253,18 @@ static int write_dir(struct open_file *ofile, const char *buf, size_t len,
 		return -EINVAL;
 
 	while (total < len) {
-		new_ddent = (struct disk_dentry *)(buf + total);
-		if (!new_ddent->size)
+		ddent = (struct disk_dentry *)(buf + total);
+		if (!ddent->size)
 			return -EINVAL;
 
-		dentry = add_dentry(ofile->dentry, (char *)new_ddent->name,
-				new_ddent->mode);
-		if (IS_ERR(dentry))
-			return -PTR_ERR(dentry);
+		err = dup_disk_dentry(ofile->dentry, ddent);
+		if (err)
+			return err;
 
-		ddent = dentry->ddent;
-		memcpy(ddent->digest, new_ddent->digest, CHUNK_DIGEST_LEN);
-		memcpy(ddent->secret_digest, new_ddent->secret_digest,
-				CHUNK_DIGEST_LEN);
+		TRACE("%s %s %s\n", (char *)ddent->name,
+				digest_string(ddent->digest),
+				digest_string(ddent->secret_digest));
 
-		TRACE("%s %s %s\n", (char *)new_ddent->name,
-				digest_string(new_ddent->digest),
-				digest_string(new_ddent->secret_digest));
-
-		dentry->size = new_ddent->size;
-		dentry->dirty = 1;
-
-		__put_dentry(dentry);
 		total += sizeof(struct disk_dentry);
 	}
 

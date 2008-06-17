@@ -228,8 +228,7 @@ int init_chunk_tree(struct chunk_tree *ctree, unsigned nr_leafs,
 		unsigned char *root_digest, struct chunk_tree_operations *ops)
 {
 	struct chunk_node *root;
-	unsigned nr;
-	int i, err;
+	int err;
 
 	if (!root_digest)
 		return -EINVAL;
@@ -238,18 +237,11 @@ int init_chunk_tree(struct chunk_tree *ctree, unsigned nr_leafs,
 	ctree->nr_leafs = nr_leafs;
 	ctree->height = 0;
 
-	if (!nr_leafs)
-		nr_leafs = 1;
+	nr_leafs -= !!nr_leafs;
 
-	/* FIXME: I'm dumb.. can't find a cleaner way. */
-	for (;;) {
-		nr = nr_leafs - 1;
-		for (i = 0; i < ctree->height; i ++)
-			nr /= DIGESTS_PER_CHUNK;
-		if (!nr)
-			break;
-		ctree->height ++;
-	}
+	/* fls(x) ~= log2(x) + 1 */
+	ctree->height = (fls(nr_leafs) - 1) / (fls(DIGESTS_PER_CHUNK) - 1);
+	ctree->height += !!nr_leafs;
 
 	root = new_chunk_node(ctree, root_digest, !ctree->height);
 	if (IS_ERR(root))
@@ -303,4 +295,5 @@ int flush_chunk_tree(struct chunk_tree *ctree)
 {
 	return flush_chunk_node_recursive(ctree->root, ctree->height);
 }
+
 

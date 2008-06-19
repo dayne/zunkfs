@@ -158,7 +158,7 @@ again:
 	return cnode;
 }
 
-static inline unsigned chunk_nr(const struct chunk_node *cnode)
+static inline unsigned __chunk_nr(const struct chunk_node *cnode)
 {
 	const struct chunk_node *parent = cnode->parent;
 	unsigned nr;
@@ -166,6 +166,15 @@ static inline unsigned chunk_nr(const struct chunk_node *cnode)
 	nr = (cnode->chunk_digest - parent->chunk_data) / CHUNK_DIGEST_LEN;
 	assert(nr < DIGESTS_PER_CHUNK);
 	return nr;
+}
+
+unsigned chunk_nr(const struct chunk_node *cnode)
+{
+	if (cnode == cnode->ctree->root)
+		return 0;
+
+	return DIGESTS_PER_CHUNK * chunk_nr(cnode->parent) +
+		__chunk_nr(cnode);
 }
 
 static int flush_chunk_node(struct chunk_node *cnode)
@@ -211,7 +220,7 @@ static void __put_chunk_node(struct chunk_node *cnode, int leaf)
 		parent = cnode->parent;
 		assert(parent != NULL);
 
-		children_of(parent)[chunk_nr(cnode)] = NULL;
+		children_of(parent)[__chunk_nr(cnode)] = NULL;
 		free(cnode);
 
 		cnode = parent;

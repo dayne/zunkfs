@@ -34,5 +34,7 @@ int init_chunk_tree(struct chunk_tree *ctree, unsigned nr_leafs,
 void free_chunk_tree(struct chunk_tree *ctree);
 int flush_chunk_tree(struct chunk_tree *ctree);
 
+unsigned chunk_nr(const struct chunk_node *cnode);
+
 #endif
 

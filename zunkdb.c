@@ -53,14 +53,13 @@ struct node {
 
 #define NODE_VEC_MAX	5
 
-static char *value_dir = NULL;
-
 static LIST_HEAD(node_list);
 static LIST_HEAD(client_list);
 
 static char *prog;
 static struct sockaddr_in my_addr;
 static unsigned forward_stores = 0;
+static unsigned nr_chunkdbs = 0;
 
 static inline unsigned char *__data_digest(const void *buf, size_t len,
 		unsigned char *digest)
@@ -538,7 +537,6 @@ enum {
 	OPT_HELP = 'h',
 	OPT_PEER = 'p',
 	OPT_ADDR = 'a',
-	OPT_PATH = 'c',
 	OPT_FORWORD_STORES = 'f',
 	OPT_LOG = 'l',
 	OPT_CHUNK_DB = 'd',
@@ -548,7 +546,6 @@ static const char short_opts[] = {
 	OPT_HELP,
 	OPT_PEER,
 	OPT_ADDR,
-	OPT_PATH,
 	OPT_FORWORD_STORES,
 	OPT_LOG,
 	OPT_CHUNK_DB,
@@ -559,7 +556,6 @@ static const struct option long_opts[] = {
 	{ "help", no_argument, NULL, OPT_HELP },
 	{ "peer", required_argument, NULL, OPT_PEER },
 	{ "addr", required_argument, NULL, OPT_ADDR },
-	{ "chunk-dir", required_argument, NULL, OPT_PATH },
 	{ "forward-store", no_argument, NULL, OPT_FORWORD_STORES },
 	{ "chunk-db", required_argument, NULL, OPT_CHUNK_DB },
 	{ NULL }
@@ -569,7 +565,6 @@ static const struct option long_opts[] = {
 "-h|--help\n"\
 "-p|--peer <(ip|hostname):port>    Connect to this peer.\n"\
 "-a|--addr <[ip:]port>             Listen on specified IP and port.\n"\
-"-c|--chunk-dir <path>             Path to chunk directory.\n"\
 "-f|--forward-store                Automatically forward store requests,\n"\
 "                                  and don't send nearest nodes as a reply.\n"\
 "-l|--log [level,]<file>           Enable logging of (E)rrors, (W)arnings,\n"\
@@ -612,22 +607,6 @@ static int proc_opt(int opt, char *arg)
 		my_addr = *sa;
 		return 0;
 
-	case OPT_PATH:
-		if (arg[0] != '/') {
-			fprintf(stderr, "Must supply full path to "
-					"chunks dir.\n");
-			return -EINVAL;
-		}
-
-		if (access(arg, R_OK|W_OK|X_OK)) {
-			int err = -errno;
-			fprintf(stderr, "%s: %s\n", arg, strerror(-err));
-			return err;
-		}
-
-		value_dir = arg;
-		return 0;
-
 	case OPT_FORWORD_STORES:
 		forward_stores = 1;
 		return 0;
@@ -648,6 +627,7 @@ static int proc_opt(int opt, char *arg)
 					optarg, strerror(-err));
 			return err;
 		}
+		nr_chunkdbs ++;
 		return 0;
 
 	default:
@@ -695,6 +675,11 @@ int main(int argc, char **argv)
 
 	if (optind != argc)
 		usage(-1);
+
+	if (!nr_chunkdbs) {
+		fprintf(stderr, "Must specify at least one chunk database.\n\n");
+		usage(-1);
+	}
 
 	sk = socket(AF_INET, SOCK_STREAM, 0);
 	if (sk < 0) {

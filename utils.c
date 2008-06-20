@@ -17,6 +17,27 @@
 FILE *zunkfs_log_fd = NULL;
 char zunkfs_log_level = 0;
 
+int set_logging(const char *params)
+{
+	if (zunkfs_log_fd)
+		return -EALREADY;
+
+	if (params[1] == ',') {
+		if (!strchr("EWT", params[0]))
+			return -EINVAL;
+		zunkfs_log_level = params[0];
+		params += 2;
+	}
+	if (!strcmp(params, "stderr"))
+		zunkfs_log_fd = stderr;
+	else if (!strcmp(params, "stdout"))
+		zunkfs_log_fd = stdout;
+	else
+		zunkfs_log_fd = fopen(params, "w");
+
+	return zunkfs_log_fd ? 0 : -errno;
+}
+
 void __zprintf(char level, const char *function, int line, const char *fmt, ...)
 {
 	static DECLARE_MUTEX(log_mutex);

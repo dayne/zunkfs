@@ -10,6 +10,7 @@ extern size_t strnlen(const char *s, size_t maxlen);
 /*
  * Logging
  */
+int set_logging(const char *params);
 void __zprintf(char level, const char *funct, int line, const char *fmt, ...);
 
 extern FILE *zunkfs_log_fd;

@@ -453,23 +453,12 @@ static int opt_proc(void *data, const char *arg, int key,
 			return -1;
 		return 0;
 	case OPT_LOG:
-		if (zunkfs_log_fd) {
-			fprintf(stderr, "Log file specified more than once.\n");
+		err = set_logging(arg + 6);
+		if (err) {
+			fprintf(stderr, "Failed to enable logging: %s\n",
+					strerror(-err));
 			return -1;
 		}
-		arg += 6;
-		if (arg[1] == ',') {
-			if (!strchr("EWT", arg[0]))
-				return -1;
-			zunkfs_log_level = arg[0];
-			arg += 2;
-		}
-		if (!strcmp(arg, "stderr"))
-			zunkfs_log_fd = stderr;
-		else if (!strcmp(arg, "stdout"))
-			zunkfs_log_fd = stdout;
-		else
-			zunkfs_log_fd = fopen(arg, "w");
 		return 0;
 	case OPT_CHUNK_DB:
 		arg += 11;

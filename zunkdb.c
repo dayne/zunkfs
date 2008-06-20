@@ -540,6 +540,7 @@ enum {
 	OPT_ADDR = 'a',
 	OPT_PATH = 'c',
 	OPT_FORWORD_STORES = 'f',
+	OPT_LOG = 'l',
 	OPT_CHUNK_DB = 'd',
 };
 
@@ -549,6 +550,7 @@ static const char short_opts[] = {
 	OPT_ADDR,
 	OPT_PATH,
 	OPT_FORWORD_STORES,
+	OPT_LOG,
 	OPT_CHUNK_DB,
 	0
 };
@@ -570,6 +572,9 @@ static const struct option long_opts[] = {
 "-c|--chunk-dir <path>             Path to chunk directory.\n"\
 "-f|--forward-store                Automatically forward store requests,\n"\
 "                                  and don't send nearest nodes as a reply.\n"\
+"-l|--log [level,]<file>           Enable logging of (E)rrors, (W)arnings,\n"\
+"                                  (T)races to a file. File can be a path,\n"\
+"                                  stdout, or stderr.\n"\
 "-d|--chunk-db <spec>              Add a chunk-db.\n"\
 "\nChunk-db specs:\n"
 
@@ -625,6 +630,15 @@ static int proc_opt(int opt, char *arg)
 
 	case OPT_FORWORD_STORES:
 		forward_stores = 1;
+		return 0;
+
+	case OPT_LOG:
+		err = set_logging(optarg);
+		if (err) {
+			fprintf(stderr, "Failed to enable logging: %s\n",
+					strerror(-err));
+			return err;
+		}
 		return 0;
 
 	case OPT_CHUNK_DB:

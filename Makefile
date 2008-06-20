@@ -71,7 +71,7 @@ zunkfs-list-ddents: $(CORE_OBJS) $(DBTYPES) zunkfs-list-ddents.o
 zunkfs-add-ddent: $(CORE_OBJS) $(DBTYPES) zunkfs-add-ddent.o 
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-zunkdb: zunkdb.o base64.o digest.o utils.o mutex.o
+zunkdb: $(CORE_OBJS) $(DBTYPES) zunkdb.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 test-client: client.o base64.o

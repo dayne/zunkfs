@@ -23,6 +23,8 @@
 #include "list.h"
 #include "digest.h"
 #include "utils.h"
+#include "zunkfs.h"
+#include "chunk-db.h"
 
 struct node {
 	int fd;
@@ -191,7 +193,7 @@ static int connect_node(struct node *node)
 
 	evbuf = evbuffer_new();
 	if (!evbuf) {
-		printf("eek: failed to allocated evbuffer\n");
+		printf("eek: failed to allocate evbuffer\n");
 		free_node(node);
 		return -ENOMEM;
 	}
@@ -355,77 +357,29 @@ static void nearest_nodes(const unsigned char *key, struct evbuffer *output,
 
 static int find_value(const unsigned char *key, struct evbuffer *output)
 {
-	unsigned char *value;
-	char path[PATH_MAX];
-	struct stat st;
-	ssize_t n;
-	int fd, len;
+	unsigned char value[CHUNK_SIZE];
+	int len;
 
-	len = snprintf(path, PATH_MAX, "%s/%s", value_dir, digest_string(key));
-	if (len == PATH_MAX) {
-		fprintf(stderr, "find_value: path too long.\n");
-		return 0;
+	len = read_chunk(value, key);
+
+	if (len == CHUNK_SIZE) {
+		evbuffer_add_printf(output, "%s ", STORE_VALUE);
+		base64_encode_evbuf(output, value, CHUNK_SIZE);
+		evbuffer_add(output, "\r\n", 2);
+		return 1;
 	}
 
-	fd = open(path, O_RDONLY);
-	if (fd < 0) {
-		fprintf(stderr, "\topen: %s\n", strerror(errno));
-		return 0;
-	}
-
-	if (fstat(fd, &st)) {
-		fprintf(stderr, "\tstat: %s\n", strerror(errno));
-		close(fd);
-		return 0;
-	}
-
-	value = alloca(st.st_size);
-	if (!value) {
-		fprintf(stderr, "\t%s\n", strerror(errno));
-		close(fd);
-		return 0;
-	}
-
-	fprintf(stderr, "chunk size: %zu\n", (size_t)st.st_size);
-
-	n = read(fd, value, st.st_size);
-	if (n < 0) {
-		fprintf(stderr, "\tread: %s\n", strerror(errno));
-		close(fd);
-		return 0;
-	}
-	
-	evbuffer_add_printf(output, "%s ", STORE_VALUE);
-	base64_encode_evbuf(output, value, st.st_size);
-	evbuffer_add(output, "\r\n", 2);
-
-	close(fd);
-
-	return 1;
+	return 0;
 }
 
-static void store_value(const unsigned char *value, size_t size,
-		const unsigned char *key)
+static int store_value(const char *value, unsigned char *digest)
 {
-	char path[PATH_MAX];
-	int fd, len;
+	unsigned char chunk[CHUNK_SIZE];
 
-	len = snprintf(path, PATH_MAX, "%s/%s", value_dir, digest_string(key));
-	if (len == PATH_MAX) {
-		fprintf(stderr, "store_value: path too long\n");
-		return;
-	}
+	if (base64_decode(value, chunk, CHUNK_SIZE) != CHUNK_SIZE)
+		return -EINVAL;
 
-	fd = open(path, O_WRONLY|O_EXCL|O_CREAT, 0644);
-	if (fd < 0) {
-		fprintf(stderr, "\t%s\n", strerror(errno));
-		return;
-	}
-
-	if (write(fd, value, size) < 0)
-		fprintf(stderr, "\t%s\n", strerror(errno));
-
-	close(fd);
+	return write_chunk(chunk, digest);
 }
 
 static void forward_value(const unsigned char *key, const char *encoded_value,
@@ -462,8 +416,8 @@ static inline void request_done(const char *key_str, struct evbuffer *output)
 
 static void proc_msg(const char *buf, size_t len, struct node *node)
 {
+	unsigned char digest[SHA_DIGEST_LENGTH];
 	struct evbuffer *output;
-	unsigned char *key;
 	char *msg;
 
 	output = evbuffer_new();
@@ -479,35 +433,28 @@ static void proc_msg(const char *buf, size_t len, struct node *node)
 		msg += FIND_VALUE_LEN + 1;
 		len -= FIND_VALUE_LEN + 1;
 
-		key = string_digest(msg);
-		if (!IS_ERR(key) && !find_value(key, output))
-			nearest_nodes(key, output, NODE_VEC_MAX);
+		__string_digest(msg, digest);
+
+		if (!find_value(digest, output))
+			nearest_nodes(digest, output, NODE_VEC_MAX);
 
 		request_done(msg, output);
 		
 	} else if (!strncmp(msg, STORE_VALUE, STORE_VALUE_LEN)) {
-		unsigned char *value;
-
 		msg += STORE_VALUE_LEN + 1;
 		len -= STORE_VALUE_LEN - 1;
 		
-		len = base64_size(len);
-
-		value = alloca(len);
-		if (!value)
+		if (store_value(msg, digest) != CHUNK_SIZE) {
+			free_node(node);
 			return;
-
-		len = base64_decode(msg, value, len);
-		key = data_digest(value, len);
-
-		store_value(value, len, key);
+		}
 
 		if (forward_stores)
-			forward_value(key, msg, node);
+			forward_value(digest, msg, node);
 		else
-			nearest_nodes(key, output, NODE_VEC_MAX);
+			nearest_nodes(digest, output, NODE_VEC_MAX);
 
-		request_done(digest_string(key), output);
+		request_done(digest_string(digest), output);
 
 	} else if (!strncmp(msg, STORE_NODE, STORE_NODE_LEN)) {
 		struct sockaddr_in *addr;
@@ -593,6 +540,7 @@ enum {
 	OPT_ADDR = 'a',
 	OPT_PATH = 'c',
 	OPT_FORWORD_STORES = 'f',
+	OPT_CHUNK_DB = 'd',
 };
 
 static const char short_opts[] = {
@@ -601,6 +549,7 @@ static const char short_opts[] = {
 	OPT_ADDR,
 	OPT_PATH,
 	OPT_FORWORD_STORES,
+	OPT_CHUNK_DB,
 	0
 };
 
@@ -610,6 +559,7 @@ static const struct option long_opts[] = {
 	{ "addr", required_argument, NULL, OPT_ADDR },
 	{ "chunk-dir", required_argument, NULL, OPT_PATH },
 	{ "forward-store", no_argument, NULL, OPT_FORWORD_STORES },
+	{ "chunk-db", required_argument, NULL, OPT_CHUNK_DB },
 	{ NULL }
 };
 
@@ -619,12 +569,15 @@ static const struct option long_opts[] = {
 "-a|--addr <[ip:]port>             Listen on specified IP and port.\n"\
 "-c|--chunk-dir <path>             Path to chunk directory.\n"\
 "-f|--forward-store                Automatically forward store requests,\n"\
-"                                  and don't send nearest nodes as a reply.\n"
+"                                  and don't send nearest nodes as a reply.\n"\
+"-d|--chunk-db <spec>              Add a chunk-db.\n"\
+"\nChunk-db specs:\n"
 
 static void usage(int exit_code)
 {
 	fprintf(stderr, "Usage: %s [ options ]\n", prog);
 	fprintf(stderr, "%s\n", USAGE);
+	help_chunkdb();
 	exit(exit_code);
 }
 
@@ -672,6 +625,15 @@ static int proc_opt(int opt, char *arg)
 
 	case OPT_FORWORD_STORES:
 		forward_stores = 1;
+		return 0;
+
+	case OPT_CHUNK_DB:
+		err = add_chunkdb(optarg);
+		if (err) {
+			fprintf(stderr, "Failed to add chunk-db %s: %s\n",
+					optarg, strerror(-err));
+			return err;
+		}
 		return 0;
 
 	default:

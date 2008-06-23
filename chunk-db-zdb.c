@@ -26,6 +26,8 @@
 #include "base64.h"
 #include "list.h"
 
+extern struct event_base *current_base;
+
 struct zdb_info {
 	struct sockaddr_in start_node;
 	struct timeval timeout;
@@ -420,7 +422,7 @@ static int send_request(struct evbuffer *evbuf, struct zdb_info *db_info,
 	request.addr_concurrency = 0;
 	request.done = 0;
 
-	request.base = event_base_new();
+	request.base = current_base ?: event_base_new();
 	if (!request.base) {
 		ERROR("event_base: %s\n", strerror(errno));
 		return -EIO;
@@ -480,7 +482,8 @@ static int send_request(struct evbuffer *evbuf, struct zdb_info *db_info,
 	free(request.addr_list);
 
 	evbuffer_free(request.evbuf);
-	event_base_free(request.base);
+	if (!current_base)
+		event_base_free(request.base);
 
 	return err;
 }

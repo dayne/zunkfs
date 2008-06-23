@@ -216,22 +216,11 @@ static void store_addr(struct request *request, struct sockaddr_in *addr)
 
 static void store_node(struct request *request, char *addr_str)
 {
-	struct sockaddr_in addr;
-	char *port;
+	struct sockaddr_in *addr;
 
-	port = strchr(addr_str, ':');
-	if (!port)
-		return;
-
-	*port++ = 0;
-
-	addr.sin_family = AF_INET;
-	addr.sin_port = htons(atoi(port));
-
-	if (!inet_aton(addr_str, &addr.sin_addr))
-		return;
-
-	store_addr(request, &addr);
+	addr = string_sockaddr_in(addr_str);
+	if (addr)
+		store_addr(request, addr);
 }
 
 #define FIND_CHUNK		"find_chunk"

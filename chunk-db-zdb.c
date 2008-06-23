@@ -403,6 +403,18 @@ static void timeout_cb(int fd, short event, void *arg)
 	TRACE("request=%p\n", arg);
 }
 
+static void adjust_concurrency(struct request *request, int max)
+{
+	while (request->addr_index != request->addr_count &&
+			request->addr_concurrency < max) {
+		int err = send_request_to(request,
+				&request->addr_list[request->addr_index]);
+		request->addr_index ++;
+		if (!err)
+			request->addr_concurrency ++;
+	}
+}
+
 static int send_request(struct evbuffer *evbuf, struct zdb_info *db_info,
 		const unsigned char *digest, unsigned char *chunk)
 {
@@ -445,15 +457,8 @@ static int send_request(struct evbuffer *evbuf, struct zdb_info *db_info,
 
 	err = -EIO;
 	for (;;) {
-		while (request.addr_index != request.addr_count) {
-			if (request.addr_concurrency >=
-					db_info->max_concurrency)
-				break;
-			send_request_to(&request,
-					&request.addr_list[request.addr_index]);
-			request.addr_index ++;
-			request.addr_concurrency ++;
-		}
+		adjust_concurrency(&request, db_info->max_concurrency);
+
 		if (!timeout_pending(&to_event, &timeout)) {
 			err = -ETIMEDOUT;
 			break;

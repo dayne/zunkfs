@@ -60,6 +60,7 @@ static char *prog;
 static struct sockaddr_in my_addr;
 static unsigned forward_stores = 0;
 static unsigned nr_chunkdbs = 0;
+static unsigned daemonize = 0;
 
 static inline unsigned char *__data_digest(const void *buf, size_t len,
 		unsigned char *digest)
@@ -540,6 +541,7 @@ enum {
 	OPT_FORWORD_STORES = 'f',
 	OPT_LOG = 'l',
 	OPT_CHUNK_DB = 'c',
+	OPT_DAEMONIZE = 'd'
 };
 
 static const char short_opts[] = {
@@ -549,6 +551,7 @@ static const char short_opts[] = {
 	OPT_FORWORD_STORES,
 	OPT_LOG,
 	OPT_CHUNK_DB,
+	OPT_DAEMONIZE,
 	0
 };
 
@@ -558,6 +561,7 @@ static const struct option long_opts[] = {
 	{ "addr", required_argument, NULL, OPT_ADDR },
 	{ "forward-store", no_argument, NULL, OPT_FORWORD_STORES },
 	{ "chunk-db", required_argument, NULL, OPT_CHUNK_DB },
+	{ "daemonize", no_argument, NULL, OPT_DAEMONIZE },
 	{ NULL }
 };
 
@@ -571,6 +575,7 @@ static const struct option long_opts[] = {
 "                                  (T)races to a file. File can be a path,\n"\
 "                                  stdout, or stderr.\n"\
 "-c|--chunk-db <spec>              Add a chunk-db.\n"\
+"-d|--daemonize                    Fork into background.\n"\
 "\nChunk-db specs:\n"
 
 static void usage(int exit_code)
@@ -630,8 +635,25 @@ static int proc_opt(int opt, char *arg)
 		nr_chunkdbs ++;
 		return 0;
 
+	case OPT_DAEMONIZE:
+		daemonize = 1;
+		return 0;
+
 	default:
 		return -1;
+	}
+}
+
+static int do_daemonize(void)
+{
+	switch(fork()) {
+	case 0:
+		return 0;
+	case -1:
+		return -errno;
+	default:
+		exit(0);
+		return 0;
 	}
 }
 
@@ -708,6 +730,15 @@ int main(int argc, char **argv)
 
 	TRACE("Listening on %s:%u\n", inet_ntoa(my_addr.sin_addr),
 			ntohs(my_addr.sin_port));
+
+	if (daemonize) {
+		err = do_daemonize();
+		if (err) {
+			fprintf(stderr, "Failed to daemonzie: %s\n",
+					strerror(-err));
+			exit(-1);
+		}
+	}
 
 	event_dispatch();
 

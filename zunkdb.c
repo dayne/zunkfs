@@ -141,7 +141,7 @@ static void connectcb(int fd, short event, void *arg)
 	if (!connect(fd, (struct sockaddr *)&node->addr,
 				sizeof(struct sockaddr_in)) ||
 			errno == EISCONN) {
-		printf("Connected to peer %s:%u\n", 
+		TRACE("Connected to peer %s:%u\n", 
 				inet_ntoa(node->addr.sin_addr),
 				ntohs(node->addr.sin_port));
 		bufferevent_enable(node->bev, EV_READ | EV_WRITE);
@@ -154,7 +154,7 @@ static void connectcb(int fd, short event, void *arg)
 	}
 
 	err = errno;
-	printf("Failed to connect to %s:%u: %s\n", 
+	TRACE("Failed to connect to %s:%u: %s\n", 
 			inet_ntoa(node->addr.sin_addr),
 			ntohs(node->addr.sin_port),
 			strerror(err));
@@ -192,7 +192,7 @@ static int connect_node(struct node *node)
 
 	evbuf = evbuffer_new();
 	if (!evbuf) {
-		printf("eek: failed to allocate evbuffer\n");
+		ERROR("eek: failed to allocate evbuffer\n");
 		free_node(node);
 		return -ENOMEM;
 	}
@@ -241,7 +241,7 @@ again:
 
 	list_add_tail(&node->nd_entry, &node_list);
 
-	printf("added node %s:%u\n", node_addr_string(node), node_port(node));
+	TRACE("added node %s:%u\n", node_addr_string(node), node_port(node));
 
 	return connect_node(node);
 }
@@ -259,12 +259,12 @@ static void dns_resolvecb(int result, char type, int count, int ttl,
 	port = addr_str + strlen(addr_str) + 1;
 
 	if(result != DNS_ERR_NONE || type != DNS_IPv4_A) {
-		printf("Failed to resolve %s.\n", addr_str);
+		ERROR("Failed to resolve %s.\n", addr_str);
 		free(addr_str);
 		return;
 	}
 
-	printf("Resolved %s to be %s\n", addr_str, inet_ntoa(*addrs));
+	TRACE("Resolved %s to be %s\n", addr_str, inet_ntoa(*addrs));
 
 	sa.sin_family = AF_INET;
 	sa.sin_addr = *addrs;
@@ -293,10 +293,10 @@ static int dns_resolve(char *addr_str)
 		return -EINVAL;
 	*port++ = 0;
 
-	printf("Resolving %s... \n", addr_str_copy);
+	TRACE("Resolving %s... \n", addr_str_copy);
 
 	if(evdns_resolve_ipv4(addr_str_copy, 0, dns_resolvecb, addr_str_copy)) {
-		printf("Failed to resolve %s.\n", addr_str_copy);
+		ERROR("Failed to resolve %s.\n", addr_str_copy);
 		return -EINVAL;
 	}
 
@@ -342,13 +342,13 @@ static void nearest_nodes(const unsigned char *key, struct evbuffer *output,
 	int i, count;
 
 	count = __nearest_nodes(key, node_vec, dist_vec, max);
-	printf("%d nodes near %s\n", count, digest_string(key));
+	TRACE("%d nodes near %s\n", count, digest_string(key));
 	for (i = 0; i < count; i ++) {
 		evbuffer_add_printf(output, "%s %s:%u\r\n",
 				STORE_NODE,
 				node_addr_string(node_vec[i]),
 				node_port(node_vec[i]));
-		printf("\t%s:%u\n",
+		TRACE("\t%s:%u\n",
 				node_addr_string(node_vec[i]),
 				node_port(node_vec[i]));
 	}
@@ -494,7 +494,7 @@ static void readcb(struct bufferevent *bev, void *arg)
 static void errorcb(struct bufferevent *bev, short what, void *arg)
 {
 	struct node *cl = arg;
-	printf("client disconnected: %p\n", cl);
+	TRACE("client disconnected: %p\n", cl);
 	free_node(cl);
 }
 
@@ -530,7 +530,7 @@ again:
 
 	bufferevent_enable(cl->bev, EV_READ | EV_WRITE);
 
-	printf("client connected: %p %s\n", cl, inet_ntoa(cl->addr.sin_addr));
+	TRACE("client connected: %p %s\n", cl, inet_ntoa(cl->addr.sin_addr));
 }
 
 enum {
@@ -539,7 +539,7 @@ enum {
 	OPT_ADDR = 'a',
 	OPT_FORWORD_STORES = 'f',
 	OPT_LOG = 'l',
-	OPT_CHUNK_DB = 'd',
+	OPT_CHUNK_DB = 'c',
 };
 
 static const char short_opts[] = {
@@ -570,7 +570,7 @@ static const struct option long_opts[] = {
 "-l|--log [level,]<file>           Enable logging of (E)rrors, (W)arnings,\n"\
 "                                  (T)races to a file. File can be a path,\n"\
 "                                  stdout, or stderr.\n"\
-"-d|--chunk-db <spec>              Add a chunk-db.\n"\
+"-c|--chunk-db <spec>              Add a chunk-db.\n"\
 "\nChunk-db specs:\n"
 
 static void usage(int exit_code)
@@ -706,7 +706,7 @@ int main(int argc, char **argv)
 	event_set(&accept_event, sk, EV_READ|EV_PERSIST, accept_client, NULL);
 	event_add(&accept_event, NULL);
 
-	printf("Listening on %s:%u\n", inet_ntoa(my_addr.sin_addr),
+	TRACE("Listening on %s:%u\n", inet_ntoa(my_addr.sin_addr),
 			ntohs(my_addr.sin_port));
 
 	event_dispatch();

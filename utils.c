@@ -10,6 +10,9 @@
 #include <pthread.h>
 #include <errno.h>
 #include <sys/mman.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <arpa/inet.h>
 
 #include "utils.h"
 #include "mutex.h"
@@ -91,4 +94,37 @@ size_t strnlen(const char *str, size_t max)
 	return len;
 }
 #endif
+
+struct sockaddr_in *__string_sockaddr_in(const char *str,
+		struct sockaddr_in *sa)
+{
+	char *addr_str;
+	char *port;
+
+	assert(sa != NULL);
+	assert(str != NULL);
+
+	memset(sa, 0, sizeof(struct sockaddr_in));
+
+	addr_str = alloca(strlen(str) + 1);
+	if (!addr_str)
+		return NULL;
+
+	strcpy(addr_str, str);
+
+	port = strchr(addr_str, ':');
+	if (!port)
+		return NULL;
+
+	*port++ = 0;
+	
+	sa->sin_family = AF_INET;
+	sa->sin_port = htons(atoi(port));
+	sa->sin_addr.s_addr = INADDR_ANY;
+
+	if (*addr_str && !inet_aton(addr_str, &sa->sin_addr))
+		return NULL;
+
+	return sa;
+}
 

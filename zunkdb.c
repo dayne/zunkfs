@@ -42,10 +42,10 @@ struct node {
 	(node_addr(node).s_addr == (addr)->sin_addr.s_addr && \
 	 node_port(node) == ntohs((addr)->sin_port))
 
-#define FIND_VALUE		"find_chunk"
-#define FIND_VALUE_LEN		(sizeof(FIND_VALUE) - 1)
-#define STORE_VALUE		"store_chunk"
-#define STORE_VALUE_LEN		(sizeof(STORE_VALUE) - 1)
+#define FIND_CHUNK		"find_chunk"
+#define FIND_CHUNK_LEN		(sizeof(FIND_CHUNK) - 1)
+#define STORE_CHUNK		"store_chunk"
+#define STORE_CHUNK_LEN		(sizeof(STORE_CHUNK) - 1)
 #define REQUEST_DONE		"request_done"
 #define REQUEST_DONE_LEN	(sizeof(REQUEST_DONE) - 1)
 #define STORE_NODE		"store_node"
@@ -73,42 +73,6 @@ static inline unsigned char *__data_digest(const void *buf, size_t len,
 #define data_digest(buf, len) __data_digest(buf, len, alloca(SHA_DIGEST_LENGTH))
 
 #define node_digest(node) data_digest(&(node)->addr, sizeof(struct sockaddr_in))
-
-static struct sockaddr_in *__string_sockaddr_in(const char *str,
-		struct sockaddr_in *sa)
-{
-	char *addr_str;
-	char *port;
-
-	assert(sa != NULL);
-	assert(str != NULL);
-
-	memset(sa, 0, sizeof(struct sockaddr_in));
-
-	addr_str = alloca(strlen(str) + 1);
-	if (!addr_str)
-		return NULL;
-
-	strcpy(addr_str, str);
-
-	port = strchr(addr_str, ':');
-	if (!port)
-		return NULL;
-
-	*port++ = 0;
-	
-	sa->sin_family = AF_INET;
-	sa->sin_port = htons(atoi(port));
-	sa->sin_addr.s_addr = INADDR_ANY;
-
-	if (*addr_str && !inet_aton(addr_str, &sa->sin_addr))
-		return NULL;
-
-	return sa;
-}
-
-#define string_sockaddr_in(addr_str) \
-	__string_sockaddr_in(addr_str, alloca(sizeof(struct sockaddr_in)))
 
 static void free_node(struct node *node)
 {
@@ -363,7 +327,7 @@ static int find_value(const unsigned char *key, struct evbuffer *output)
 	len = read_chunk(value, key);
 
 	if (len == CHUNK_SIZE) {
-		evbuffer_add_printf(output, "%s ", STORE_VALUE);
+		evbuffer_add_printf(output, "%s ", STORE_CHUNK);
 		base64_encode_evbuf(output, value, CHUNK_SIZE);
 		evbuffer_add(output, "\r\n", 2);
 		return 1;
@@ -400,7 +364,7 @@ static void forward_value(const unsigned char *key, const char *encoded_value,
 	for (i = 0; i < count; i ++) {
 		if (d < dist_vec[i])
 			continue;
-		evbuffer_add_printf(buf, "%s %s\r\n", STORE_VALUE,
+		evbuffer_add_printf(buf, "%s %s\r\n", STORE_CHUNK,
 				encoded_value);
 		bufferevent_write_buffer(node_vec[i]->bev, buf);
 	}
@@ -429,9 +393,9 @@ static void proc_msg(const char *buf, size_t len, struct node *node)
 	memcpy(msg, buf, len);
 	msg[len] = 0;
 
-	if (!strncmp(msg, FIND_VALUE, FIND_VALUE_LEN)) {
-		msg += FIND_VALUE_LEN + 1;
-		len -= FIND_VALUE_LEN + 1;
+	if (!strncmp(msg, FIND_CHUNK, FIND_CHUNK_LEN)) {
+		msg += FIND_CHUNK_LEN + 1;
+		len -= FIND_CHUNK_LEN + 1;
 
 		__string_digest(msg, digest);
 
@@ -440,9 +404,9 @@ static void proc_msg(const char *buf, size_t len, struct node *node)
 
 		request_done(msg, output);
 		
-	} else if (!strncmp(msg, STORE_VALUE, STORE_VALUE_LEN)) {
-		msg += STORE_VALUE_LEN + 1;
-		len -= STORE_VALUE_LEN - 1;
+	} else if (!strncmp(msg, STORE_CHUNK, STORE_CHUNK_LEN)) {
+		msg += STORE_CHUNK_LEN + 1;
+		len -= STORE_CHUNK_LEN - 1;
 		
 		if (store_value(msg, digest) != CHUNK_SIZE) {
 			free_node(node);

@@ -98,5 +98,16 @@ static inline int IS_ERR(const void *ptr)
 #define container_of(ptr, type, memb) \
 	((type *)((unsigned long)(ptr) - (unsigned long)&((type *)0)->memb))
 
+/*
+ * Socket helpers
+ */
+struct sockaddr_in;
+
+struct sockaddr_in *__string_sockaddr_in(const char *str,
+		struct sockaddr_in *sa);
+
+#define string_sockaddr_in(addr_str) \
+	__string_sockaddr_in(addr_str, alloca(sizeof(struct sockaddr_in)))
+
 #endif
 

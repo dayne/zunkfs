@@ -21,11 +21,8 @@
 #include "chunk-db.h"
 #include "utils.h"
 
-static chunkdb_ctor *ctor_list = NULL;
-static int ctor_count = 0;
-
-static struct chunk_db **chunkdb_list = NULL;
-static int chunkdb_count = 0;
+static LIST_HEAD(chunkdb_types);
+static LIST_HEAD(chunkdb_list);
 
 static inline int cmp_digest(const unsigned char *a, const unsigned char *b)
 {
@@ -51,21 +48,16 @@ int random_chunk_digest(unsigned char *digest)
 	return write_chunk((void *)chunk_data, digest);
 }
 
-void register_chunkdb(chunkdb_ctor ctor)
+void register_chunkdb(struct chunk_db_type *type)
 {
-	int n = ctor_count ++;
-
-	ctor_list = realloc(ctor_list, ctor_count * sizeof(chunkdb_ctor));
-	if (!ctor_list)
-		panic("Failed to resize list of chunk database types.\n");
-
-	ctor_list[n] = ctor;
+	list_add_tail(&type->type_entry, &chunkdb_types);
 }
 
 int add_chunkdb(const char *spec)
 {
+	struct chunk_db_type *type;
 	struct chunk_db *cdb;
-	int i, n, mode;
+	int mode;
 
 	if (!strncmp(spec, "ro,", 3)) {
 		mode = CHUNKDB_RO;
@@ -79,8 +71,8 @@ int add_chunkdb(const char *spec)
 	} else
 		return -EINVAL;
 
-	for (i = 0; i < ctor_count; i ++) {
-		cdb = ctor_list[i](mode, spec);
+	list_for_each_entry(type, &chunkdb_types, type_entry) {
+		cdb = type->ctor(mode, spec);
 		if (cdb)
 			goto found;
 	}
@@ -90,25 +82,28 @@ found:
 	if (IS_ERR(cdb))
 		return -PTR_ERR(cdb);
 
-	n = chunkdb_count ++;
-	chunkdb_list = realloc(chunkdb_list,
-			chunkdb_count * sizeof(struct chunk_db *));
-	if (!chunkdb_list)
-		panic("Failed to resize list of chunk databases.\n");
+	list_add_tail(&cdb->db_entry, &chunkdb_list);
 
 	cdb->mode = mode;
-	chunkdb_list[n] = cdb;
 
 	return 0;
+}
+
+void help_chunkdb(void)
+{
+	struct chunk_db_type *type;
+	
+	list_for_each_entry(type, &chunkdb_types, type_entry)
+		if (type->help)
+			fprintf(stderr, "%s\n", type->help);
 }
 
 int read_chunk(unsigned char *chunk, const unsigned char *digest)
 {
 	struct chunk_db *cdb;
-	int i, len;
+	int len;
 
-	for (i = 0; i < chunkdb_count; i ++) {
-		cdb = chunkdb_list[i];
+	list_for_each_entry(cdb, &chunkdb_list, db_entry) {
 		if (cdb->read_chunk) {
 			len = cdb->read_chunk(chunk, digest, cdb->db_info);
 			if (len > 0 && verify_chunk(chunk, digest))
@@ -119,8 +114,10 @@ int read_chunk(unsigned char *chunk, const unsigned char *digest)
 	TRACE("chunk not found: %s\n", digest_string(digest));
 	return -EIO;
 cache_chunk:
-	while (i--) {
-		cdb = chunkdb_list[i];
+	for (;;) {
+		cdb = list_prev_entry(cdb, db_entry);
+		if (&cdb->db_entry == &chunkdb_list)
+			break;
 		if (cdb->write_chunk)
 			cdb->write_chunk(chunk, digest, cdb->db_info);
 	}
@@ -131,15 +128,14 @@ cache_chunk:
 int write_chunk(const unsigned char *chunk, unsigned char *digest)
 {
 	struct chunk_db *cdb;
-	int i, n, ret;
+	int n, ret;
 
 	digest_chunk(chunk, digest);
 
 	TRACE("digest=%s\n", digest_string(digest));
 
 	ret = -EIO;
-	for (i = 0; i < chunkdb_count; i ++) {
-		cdb = chunkdb_list[i];
+	list_for_each_entry(cdb, &chunkdb_list, db_entry) {
 		if (cdb->write_chunk) {
 			n = cdb->write_chunk(chunk, digest, cdb->db_info);
 			if (n > ret)

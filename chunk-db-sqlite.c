@@ -128,13 +128,23 @@ static struct chunk_db *sqlite_chunkdb_ctor(int mode, const char *spec)
 	}
 
 	cdb->read_chunk = read_chunk_sqlite;
-	cdb->write_chunk = (mode == CHUNKDB_RW) ? write_chunk_sqlite : NULL;
+	cdb->write_chunk = (mode == CHUNKDB_RO) ? NULL : write_chunk_sqlite;
 
 	return cdb;
 }
 
+static struct chunk_db_type sqlite_chunkdb_type = {
+	.ctor = sqlite_chunkdb_ctor,
+	.help =
+"   sqlite:<database>       SQLite storage for chunks. Database schema:\n"
+"                              CREATE TABLE chunk (\n"
+"                                      hash CHAR(20) PRIMARY KEY UNIQUE,\n"
+"                                      data BLOB\n"
+"                              );\n"
+};
+
 static void __attribute__((constructor)) init_sqlite_chunkdb(void)
 {
-	register_chunkdb(sqlite_chunkdb_ctor);
+	register_chunkdb(&sqlite_chunkdb_type);
 }
 

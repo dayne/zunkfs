@@ -646,7 +646,7 @@ static struct chunk_db *zdb_chunkdb_ctor(int mode, const char *spec)
 	zdb_info->min_concurrency = 1;
 
 	cdb->read_chunk = zdb_read_chunk;
-	cdb->write_chunk = (mode == CHUNKDB_RW) ? zdb_write_chunk : NULL;
+	cdb->write_chunk = (mode == CHUNKDB_RO) ? NULL : zdb_write_chunk;
 
 	err = parse_spec(spec, zdb_info);
 	if (!err)
@@ -656,8 +656,19 @@ static struct chunk_db *zdb_chunkdb_ctor(int mode, const char *spec)
 	return ERR_PTR(err);
 }
 
+static struct chunk_db_type zdb_chunkdb_type = {
+	.ctor = zdb_chunkdb_ctor,
+	.help =
+"   zunkdb:<node>[,opts]    Use a \"zunk\" database for chunk storage.\n"
+"                           Initial node is passed in as <ip|name>:<port>.\n"
+"                           Options include:\n"
+"                              --min-concurrency=#\n"
+"                              --max-concurrency=#\n"
+"                              --timeout=#."
+};
+
 static void __attribute__((constructor)) init_chunkdb_zdb(void)
 {
-	register_chunkdb(zdb_chunkdb_ctor);
+	register_chunkdb(&zdb_chunkdb_type);
 }
 

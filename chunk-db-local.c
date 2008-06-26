@@ -122,13 +122,19 @@ static struct chunk_db *local_chunkdb_ctor(int mode, const char *spec)
 	strcpy(cdb->db_info, spec+4);
 
 	cdb->read_chunk = local_read_chunk;
-	cdb->write_chunk = (mode == CHUNKDB_RW) ? local_write_chunk : NULL;
+	cdb->write_chunk = (mode == CHUNKDB_RO) ? NULL : local_write_chunk;
 
 	return cdb;
 }
 
+static struct chunk_db_type local_chunkdb_type = {
+	.ctor = local_chunkdb_ctor,
+	.help =
+"   dir:<path>              Chunks are stored in specified directory.\n"
+};
+
 static void __attribute__((constructor)) init_chunkdb_local(void)
 {
-	register_chunkdb(local_chunkdb_ctor);
+	register_chunkdb(&local_chunkdb_type);
 }
 

@@ -171,6 +171,8 @@ static inline void cache_file_chunk(struct open_file *ofile, struct chunk_node *
 {
 	if (!is_cached(cnode))
 		__cache_file_chunk(ofile, cnode);
+	else
+		put_chunk_node(cnode);
 }
 
 static int rw_file(struct open_file *ofile, char *buf, size_t bufsz,

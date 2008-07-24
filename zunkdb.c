@@ -499,6 +499,7 @@ again:
 }
 
 enum {
+	OPT_REQUIRED_ARG = ':',
 	OPT_HELP = 'h',
 	OPT_PEER = 'p',
 	OPT_ADDR = 'a',
@@ -510,11 +511,11 @@ enum {
 
 static const char short_opts[] = {
 	OPT_HELP,
-	OPT_PEER,
-	OPT_ADDR,
+	OPT_PEER, OPT_REQUIRED_ARG,
+	OPT_ADDR, OPT_REQUIRED_ARG,
 	OPT_FORWORD_STORES,
-	OPT_LOG,
-	OPT_CHUNK_DB,
+	OPT_LOG, OPT_REQUIRED_ARG,
+	OPT_CHUNK_DB, OPT_REQUIRED_ARG,
 	OPT_DAEMONIZE,
 	0
 };

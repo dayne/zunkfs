@@ -431,7 +431,7 @@ static int send_request(struct evbuffer *evbuf, struct zdb_info *db_info,
 
 	lock(&cache_mutex);
 	list_for_each_entry(node, &node_cache, node_entry) {
-		if (request.addr_concurrency >= db_info->min_concurrency)
+		if (request.addr_count >= db_info->min_concurrency)
 			break;
 		store_addr(&request, &node->addr);
 	}

@@ -18,6 +18,7 @@
 static unsigned full_output = 0;
 
 enum {
+	OPT_REQUIRED_ARG = ':',
 	OPT_CHUNK_DB = 'd',
 	OPT_LOG = 'l',
 	OPT_FULL = 'f',
@@ -25,8 +26,8 @@ enum {
 };
 
 static const char short_opts[] = {
-	OPT_CHUNK_DB,
-	OPT_LOG,
+	OPT_CHUNK_DB, OPT_REQUIRED_ARG,
+	OPT_LOG, OPT_REQUIRED_ARG,
 	OPT_FULL,
 	OPT_HELP,
 	0

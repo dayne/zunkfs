@@ -53,6 +53,7 @@ static inline int str2digest(const char *str, unsigned char *digest)
 }
 
 enum {
+	OPT_REQUIRED_ARG = ':',
 	OPT_HELP = 'h',
 	OPT_CHUNK_DB = 'd',
 	OPT_LOG = 'l',
@@ -60,7 +61,7 @@ enum {
 
 static const char short_opts[] = {
 	OPT_HELP,
-	OPT_CHUNK_DB,
+	OPT_CHUNK_DB, OPT_REQUIRED_ARG,
 	OPT_LOG,
 	0
 };

@@ -277,22 +277,24 @@ static inline int node_distance(const struct node *node,
 static int __nearest_nodes(const unsigned char *key, struct node **node_vec,
 		int *dist_vec, int max)
 {
-	int d, i, count = -1;
+	int d, i, n, count = -1;
 	struct node *node;
 
 	for (i = 0; i < max; i ++)
-		node_vec[i] = NULL;
+		dist_vec[i] = INT_MAX;
 
 	list_for_each_entry(node, &node_list, nd_entry) {
 		d = node_distance(node, key);
-		for (i = 0; i < max; i ++) {
-			if (!node_vec[i] || d < dist_vec[i]) {
-				node_vec[i] = node;
-				dist_vec[i] = d;
-				if (count < i)
-					count = i;
-				break;
-			}
+		/* find maximum, and replace.. */
+		n = 0;
+		for (i = 1; i < max; i ++)
+			if (dist_vec[n] < dist_vec[i])
+				n = i;
+		if (d < dist_vec[n]) {
+			node_vec[n] = node;
+			dist_vec[n] = d;
+			if (count < n)
+				count = n;
 		}
 	}
 
@@ -710,4 +712,5 @@ int main(int argc, char **argv)
 	fprintf(stderr, "Event processing done.\n");
 	return 0;
 }
+
 

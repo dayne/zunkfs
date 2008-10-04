@@ -34,6 +34,7 @@ struct chunk_db_type {
 #define CHUNKDB_RO 0 /* read-only */
 #define CHUNKDB_RW 1 /* read-write */
 #define CHUNKDB_WT 2 /* write thru */
+#define CHUNKDB_NC 4 /* not-a-cache */
 
 void register_chunkdb(struct chunk_db_type *type);
 int add_chunkdb(const char *spec);

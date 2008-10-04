@@ -62,15 +62,25 @@ int add_chunkdb(const char *spec)
 	if (!strncmp(spec, "ro,", 3)) {
 		mode = CHUNKDB_RO;
 		spec += 3;
-	} else if (!strncmp(spec, "rw,wt,", 6)) {
-		mode = CHUNKDB_RW|CHUNKDB_WT;
-		spec += 6;
 	} else if (!strncmp(spec, "rw,", 3)) {
 		mode = CHUNKDB_RW;
 		spec += 3;
 	} else {
 		TRACE("Ugh. You forgot the mode! (ro/rw)\n");
 		return -EINVAL;
+	}
+
+	if (mode == CHUNKDB_RW) {
+		for (;;) {
+			if (!strncmp(spec, "wt,", 3)) {
+				mode |= CHUNKDB_WT;
+				spec += 3;
+			}  else if (!strncmp(spec, "nc,", 3)) {
+				mode |= CHUNKDB_NC;
+				spec += 3;
+			} else
+				break;
+		}
 	}
 
 	list_for_each_entry(type, &chunkdb_types, type_entry) {
@@ -120,7 +130,7 @@ cache_chunk:
 		cdb = list_prev_entry(cdb, db_entry);
 		if (&cdb->db_entry == &chunkdb_list)
 			break;
-		if (cdb->write_chunk)
+		if (cdb->write_chunk && !(cdb->mode & CHUNKDB_NC))
 			cdb->write_chunk(chunk, digest, cdb->db_info);
 	}
 

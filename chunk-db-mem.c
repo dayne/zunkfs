@@ -55,9 +55,12 @@ static int mem_write_chunk(const unsigned char *chunk,
 
 	lock(&cache->mutex);
 
-	list_for_each_entry(cp, &cache->chunk_list, c_entry)
-		if (!memcmp(digest, cp->digest, CHUNK_DIGEST_LEN))
+	list_for_each_entry(cp, &cache->chunk_list, c_entry) {
+		if (!memcmp(digest, cp->digest, CHUNK_DIGEST_LEN)) {
+			TRACE("%s is a duplicate\n", digest_string(digest));
 			goto found;
+		}
+	}
 
 	ret = -ENOMEM;
 	cp = malloc(sizeof(struct chunk));

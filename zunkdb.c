@@ -328,6 +328,8 @@ static int find_value(const unsigned char *key, struct evbuffer *output)
 
 	len = read_chunk(value, key);
 
+	TRACE("read_chunk %s len=%d\n", digest_string(key), len);
+
 	if (len == CHUNK_SIZE) {
 		evbuffer_add_printf(output, "%s ", STORE_CHUNK);
 		base64_encode_evbuf(output, value, CHUNK_SIZE);
@@ -535,7 +537,7 @@ static const struct option long_opts[] = {
 #define USAGE \
 "-h|--help\n"\
 "-p|--peer <(ip|hostname):port>    Connect to this peer.\n"\
-"-a|--addr <[ip:]port>             Listen on specified IP and port.\n"\
+"-a|--addr <[ip]:port>             Listen on specified IP and port.\n"\
 "-f|--forward-store                Automatically forward store requests,\n"\
 "                                  and don't send nearest nodes as a reply.\n"\
 "-l|--log [level,]<file>           Enable logging of (E)rrors, (W)arnings,\n"\

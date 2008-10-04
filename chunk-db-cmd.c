@@ -29,8 +29,7 @@ static int xfer_chunk(unsigned char *chunk, const unsigned char *digest,
 	int len;
 	int n;
 
-	if  (!fetch_cmd)
-		return -EIO;
+	assert(fetch_cmd != NULL);
 
 	__digest_string(digest, chunk_name);
 
@@ -134,8 +133,10 @@ static struct chunk_db *cmd_chunkdb_ctor(int mode, const char *spec)
 
 	TRACE("mode=%d spec=%s\n", mode, spec);
 
-	if (access(spec, X_OK))
-		return ERR_PTR(EACCES);
+	if (access(spec, X_OK)) {
+		WARNING("%s is not executable: %s\n", spec, strerror(errno));
+		return ERR_PTR(errno);
+	}
 
 	cdb = malloc(sizeof(struct chunk_db) + strlen(spec) + 1);
 	if (!cdb)

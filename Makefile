@@ -39,7 +39,9 @@ DBTYPES=chunk-db-local.o \
 	chunk-db-mem.o \
 	chunk-db-zdb.o
 
-UNIT_TEST_OBJS=$(CORE_OBJS) unit-test-utils.o chunk-db-mem.o
+UNIT_TEST_OBJS=$(CORE_OBJS) \
+	       unit-test-utils.o \
+	       chunk-db-mem.o
 
 FINAL_OBJS=zunkfs \
 	   ctree-unit-test \
@@ -47,7 +49,8 @@ FINAL_OBJS=zunkfs \
 	   file-unit-test \
 	   zunkfs-list-ddents \
 	   zunkfs-add-ddent \
-	   zunkdb
+	   zunkdb \
+	   chunk-db-unit-test
 
 all: ${FINAL_OBJS}
 
@@ -72,6 +75,9 @@ zunkfs-add-ddent: $(CORE_OBJS) $(DBTYPES) zunkfs-add-ddent.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 zunkdb: $(CORE_OBJS) $(DBTYPES) zunkdb.o
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+chunk-db-unit-test: $(CORE_OBJS) $(DBTYPES) chunk-db-unit-test.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 test-client: client.o base64.o

@@ -57,11 +57,11 @@ void __zprintf(char level, const char *function, int line, const char *fmt, ...)
 	const char *level_str = NULL;
 	va_list ap;
 
-	if (level == 'W')
+	if (level == ZUNKFS_WARNING)
 		level_str = "WARN: ";
-	else if (level == 'E')
+	else if (level == ZUNKFS_ERROR)
 		level_str = "ERR:  ";
-	else if (level == 'T')
+	else if (level == ZUNKFS_TRACE)
 		level_str = "TRACE:";
 	else
 		abort();

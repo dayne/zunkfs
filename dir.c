@@ -46,6 +46,8 @@ static int read_dentry_chunk(unsigned char *chunk, const unsigned char *digest)
 		return 0;
 
 	err = read_chunk(chunk, digest);
+	if (err == -ENOENT)
+		return -EIO;
 	if (err < 0)
 		return err;
 
@@ -71,9 +73,8 @@ static int write_dentry_chunk(const unsigned char *chunk, unsigned char *digest)
 		real_chunk[i] = chunk[i] ^ dentry->secret_chunk[i];
 
 	err = write_chunk(real_chunk, digest);
-	if (err < 0)
-		return err;
-
+	if (err == -EEXIST)
+		return CHUNK_SIZE;
 	return err;
 }
 

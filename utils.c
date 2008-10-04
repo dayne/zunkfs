@@ -26,9 +26,19 @@ int set_logging(const char *params)
 		return -EALREADY;
 
 	if (params[1] == ',') {
-		if (!strchr("EWT", params[0]))
+		switch(params[0]) {
+		case 'E':
+			zunkfs_log_level = ZUNKFS_ERROR;
+			break;
+		case 'W':
+			zunkfs_log_level = ZUNKFS_WARNING;
+			break;
+		case 'T':
+			zunkfs_log_level = ZUNKFS_TRACE;
+			break;
+		default:
 			return -EINVAL;
-		zunkfs_log_level = params[0];
+		}
 		params += 2;
 	}
 	if (!strcmp(params, "stderr"))

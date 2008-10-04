@@ -27,9 +27,13 @@ extern char zunkfs_log_level;
 	___ret; \
 })
 
-#define WARNING(x...) zprintf('W', __FUNCTION__, __LINE__, x)
-#define ERROR(x...)   zprintf('E', __FUNCTION__, __LINE__, x)
-#define TRACE(x...)   zprintf('T', __FUNCTION__, __LINE__, x)
+#define ZUNKFS_ERROR	0
+#define ZUNKFS_WARNING	1
+#define ZUNKFS_TRACE	2
+
+#define WARNING(x...) zprintf(ZUNKFS_WARNING, __FUNCTION__, __LINE__, x)
+#define ERROR(x...)   zprintf(ZUNKFS_ERROR, __FUNCTION__, __LINE__, x)
+#define TRACE(x...)   zprintf(ZUNKFS_TRACE, __FUNCTION__, __LINE__, x)
 
 #define panic(x...) do { \
 	if (!zprintf('E', __FUNCTION__, __LINE__, x)) \

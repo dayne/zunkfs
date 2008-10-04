@@ -68,8 +68,10 @@ int add_chunkdb(const char *spec)
 	} else if (!strncmp(spec, "rw,", 3)) {
 		mode = CHUNKDB_RW;
 		spec += 3;
-	} else
+	} else {
+		TRACE("Ugh. You forgot the mode! (ro/rw)\n");
 		return -EINVAL;
+	}
 
 	list_for_each_entry(type, &chunkdb_types, type_entry) {
 		cdb = type->ctor(mode, spec);

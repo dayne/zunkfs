@@ -710,8 +710,8 @@ static struct chunk_db_type zdb_chunkdb_type = {
 "                              use_store  Use STORE instead of FORWARD\n"
 "                                         to send chunks to zunkdb. Use this\n"
 "                                         only if you have a fast uplink, as\n"
-"                                         it will end up sending the same chunk\n"
-"                                         to multiple zunkdb nodes.\n"
+"                                         it will end up sending the same\n"
+"                                         chunk to multiple zunkdb nodes.\n"
 };
 
 static void __attribute__((constructor)) init_chunkdb_zdb(void)

@@ -36,6 +36,16 @@ II. Buildling
 
   make  # hopefully that just works and you don't have any errors
 
+If you installed an alternate libevent other than what your system provides,
+make sure to set the environment variable LIBEVENT_PREFIX. For example:
+
+	export LIBEVENT_PREFIX=/usr/local
+
+Then set LD_LIBRARY_PREFIX so that your dynamic linker knows which libevent
+to use:
+
+	export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib
+
 III. Getting Started
 ====================
 
@@ -109,8 +119,9 @@ ChunkDB backends
 	Example:
 		./zunkfs --chunk-db=ro,map:$PWD/map.db ./myfs /mount/point
 
-* mem:
-	Stores chunks in memory. Read/write.
+* mem:[max count]
+	Stores chunks in memory. Read/write. Can limit the maximum # of
+	chunks stored by passing in the number.
 
 * sqlite:/path/to/sqlite/database
 	Stores chunks in an sqlite database. Read/write. Schema is:
@@ -122,10 +133,36 @@ ChunkDB backends
 	Example:
 		./zunkfs --chunk-db=rw,sqlite:$PWD/chunk.db ./myfs /mount/point
 
-* zunkdb:ip:port,timeout
-	Uses a ZunkDB to store and retrieve chunks. Connects to specified
-	IP:Port. Timeout is optional. See ZunkDB protocol spec.
-	Example:
+* zunkdb:ip:port,timeout=<seconds>,use_store
+	Uses a ZunkDB to store and retrieve chunks. Initial zunkdb node is
+	passed in as <ip|name>:port. Options include:
+		timeout=<seconds>	Request timeout.
+		use_store		Use STORE instead of FORWARD to
+					send chunks to zunkdb. Use this only
+					if you have a fast uplink, as it will
+					end up sending the same chunk to
+					multiple zunkdb nodes.
+	Usage example:
 		./zunkfs --chunk-db=rw,zunkdb:127.0.0.1:9876 ./myfs /mount/point
+
+
+V. ZunkDB usage
+===============
+ZunkDB is the distributed chunk database for zunkfs. It's protocol is briefly
+discussed in the HACKING document. Just like zunkfs, zunkdb can use other
+methods for actually storing chunks. So all of the above listed backends work
+with it too. A simple zunkdb node may use just memory backing for chunks:
+
+	zunkdb --chunk-db rw,mem:100
+
+Since zunkdb is meant to be distributed, it needs to know a starting point
+from which it can discover other nodes:
+
+	zunkdb --chunk-db rw,mem:100 --peer other.host:port
+
+By default, zunkdb listens on port 9876, but it can be told to listen to
+other ports:
+
+	zunkdb --addr [ip]:port --chunk-db rw,mem:100 --peer other.host:port
 
 

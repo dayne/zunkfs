@@ -73,6 +73,7 @@ static char *prog;
 static struct sockaddr_in my_addr;
 static unsigned nr_chunkdbs = 0;
 static unsigned daemonize = 0;
+static unsigned may_promote = 0;
 
 static inline unsigned char *__data_digest(const void *buf, size_t len,
 		unsigned char *digest)
@@ -269,6 +270,42 @@ again:
 	TRACE("added node %s:%u\n", node_addr_string(node), node_port(node));
 
 	return connect_node(node);
+}
+
+static int promote_node(struct node *node, uint16_t port)
+{
+	struct evbuffer *evbuf;
+	struct sockaddr_in addr;
+
+	addr = node->addr;
+	addr.sin_port = port;
+
+	if (!may_promote)
+		return store_node(&addr);
+
+	if (find_node(&addr)) {
+		TRACE("Ugh. Tried promoting an existing node...\n");
+		close(node->fd);
+		return -EEXIST;
+	}
+
+	TRACE("Promoting %s:%u to :%u\n",
+			node_addr_string(node),
+			node_port(node),
+			ntohs(port));
+
+	node->addr = addr;
+	list_move(&node->node_entry, &node_list);
+
+	evbuf = evbuffer_new();
+	if (!evbuf)
+		return -ENOMEM;
+
+	nearest_nodes(node_digest(node), evbuf, NODE_VEC_MAX);
+	bufferevent_write_buffer(node->bev, evbuf);
+	evbuffer_free(evbuf);
+
+	return 0;
 }
 
 static void dns_resolvecb(int result, char type, int count, int ttl, 
@@ -530,9 +567,9 @@ static void proc_msg(const char *buf, size_t len, struct node *node)
 			return;
 
 		if (addr->sin_addr.s_addr == INADDR_ANY)
-			addr->sin_addr = node->addr.sin_addr;
-
-		store_node(addr);
+			promote_node(node, addr->sin_port);
+		else
+			store_node(addr);
 
 	} else if (!strncmp(msg, FORWARD_CHUNK, FORWARD_CHUNK_LEN)) {
 		msg += FORWARD_CHUNK_LEN + 1;
@@ -642,7 +679,8 @@ enum {
 	OPT_ADDR = 'a',
 	OPT_LOG = 'l',
 	OPT_CHUNK_DB = 'c',
-	OPT_DAEMONIZE = 'd'
+	OPT_DAEMONIZE = 'd',
+	OPT_PROMOTE = 'o'
 };
 
 static const char short_opts[] = {
@@ -652,6 +690,7 @@ static const char short_opts[] = {
 	OPT_LOG, OPT_REQUIRED_ARG,
 	OPT_CHUNK_DB, OPT_REQUIRED_ARG,
 	OPT_DAEMONIZE,
+	OPT_PROMOTE,
 	0
 };
 
@@ -661,6 +700,7 @@ static const struct option long_opts[] = {
 	{ "addr", required_argument, NULL, OPT_ADDR },
 	{ "chunk-db", required_argument, NULL, OPT_CHUNK_DB },
 	{ "daemonize", no_argument, NULL, OPT_DAEMONIZE },
+	{ "promote-nodes", no_argument, NULL, OPT_PROMOTE },
 	{ NULL }
 };
 
@@ -673,6 +713,7 @@ static const struct option long_opts[] = {
 "                                  stdout, or stderr.\n"\
 "-c|--chunk-db <spec>              Add a chunk-db.\n"\
 "-d|--daemonize                    Fork into background.\n"\
+"-o|--promote-nodes                Allow promoting client nodes to server nodes.\n"\
 "\nChunk-db specs:\n"
 
 static void usage(int exit_code)
@@ -730,6 +771,10 @@ static int proc_opt(int opt, char *arg)
 
 	case OPT_DAEMONIZE:
 		daemonize = 1;
+		return 0;
+
+	case OPT_PROMOTE:
+		may_promote = 1;
 		return 0;
 
 	default:

@@ -4,8 +4,9 @@
 # script looks for a ~/usr and ~/local if you don't specify anything
 #
 
-LEFILE=libevent-1.4.3-stable.tar.gz
-LEDIR=libevent-1.4.3-stable
+LEVER=1.4.8
+LEFILE=libevent-$LEVER-stable.tar.gz
+LEDIR=libevent-$LEVER-stable
 
 if [ ! -f  local_libevent_installer.sh ]; then
   echo "You should be running this from the zunkfs directory so I can create the handy file needed for the Makefile"

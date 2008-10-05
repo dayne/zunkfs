@@ -74,6 +74,7 @@ static struct sockaddr_in my_addr;
 static unsigned nr_chunkdbs = 0;
 static unsigned daemonize = 0;
 static unsigned may_promote = 0;
+static struct timeval forward_timeout = {60, 0};
 
 static inline unsigned char *__data_digest(const void *buf, size_t len,
 		unsigned char *digest)
@@ -498,8 +499,7 @@ static void forward_chunk(const char *value, const unsigned char *digest)
 	if (!req->ref_count)
 		goto discard;
 
-	req->timeout.tv_sec = 10;
-	req->timeout.tv_usec = 0;
+	req->timeout = forward_timeout;
 
 	timeout_set(&req->timeout_event, request_timeoutcb, req);
 	timeout_add(&req->timeout_event, &req->timeout);
@@ -680,7 +680,8 @@ enum {
 	OPT_LOG = 'l',
 	OPT_CHUNK_DB = 'c',
 	OPT_DAEMONIZE = 'd',
-	OPT_PROMOTE = 'o'
+	OPT_PROMOTE = 'o',
+	OPT_FORWARD_TIMEOUT = 't',
 };
 
 static const char short_opts[] = {
@@ -691,6 +692,7 @@ static const char short_opts[] = {
 	OPT_CHUNK_DB, OPT_REQUIRED_ARG,
 	OPT_DAEMONIZE,
 	OPT_PROMOTE,
+	OPT_FORWARD_TIMEOUT, OPT_REQUIRED_ARG,
 	0
 };
 
@@ -701,6 +703,7 @@ static const struct option long_opts[] = {
 	{ "chunk-db", required_argument, NULL, OPT_CHUNK_DB },
 	{ "daemonize", no_argument, NULL, OPT_DAEMONIZE },
 	{ "promote-nodes", no_argument, NULL, OPT_PROMOTE },
+	{ "forward-timeout", required_argument, NULL, OPT_FORWARD_TIMEOUT },
 	{ NULL }
 };
 
@@ -714,6 +717,7 @@ static const struct option long_opts[] = {
 "-c|--chunk-db <spec>              Add a chunk-db.\n"\
 "-d|--daemonize                    Fork into background.\n"\
 "-o|--promote-nodes                Allow promoting client nodes to server nodes.\n"\
+"-t|--forward-timeout <seconds>    Maximum duration of a forward request.\n"\
 "\nChunk-db specs:\n"
 
 static void usage(int exit_code)
@@ -775,6 +779,10 @@ static int proc_opt(int opt, char *arg)
 
 	case OPT_PROMOTE:
 		may_promote = 1;
+		return 0;
+
+	case OPT_FORWARD_TIMEOUT:
+		forward_timeout.tv_sec = atoi(optarg);
 		return 0;
 
 	default:

@@ -105,7 +105,9 @@ write_again:
 	timersub(&end, &start, &delta);
 	start = end;
 
-	printf("time to import: %lu.%06u\n", delta.tv_sec, delta.tv_usec);
+	printf("time to import: %lu.%06lu\n",
+			(unsigned long)delta.tv_sec,
+			(unsigned long)delta.tv_usec);
 
 	fprintf(stderr, "verifying...\n");
 	err = lseek(fd, 0, SEEK_SET);
@@ -154,7 +156,9 @@ read_again3:
 	gettimeofday(&end, NULL);
 	timersub(&end, &start, &delta);
 
-	printf("time to verify: %lu.%06u\n", delta.tv_sec, delta.tv_usec);
+	printf("time to verify: %lu.%06lu\n",
+			(unsigned long)delta.tv_sec,
+			(unsigned long)delta.tv_usec);
 }
 
 int main(int argc, char **argv)

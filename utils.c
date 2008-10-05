@@ -95,15 +95,23 @@ static void __attribute__((constructor)) util_init(void)
 	memcpy((void *)&__errptr, &errptr, sizeof(void *));
 }
 
-#if ZUNKFS_OS == Darwin
-size_t strnlen(const char *str, size_t max)
+size_t __attribute__((weak)) strnlen(const char *str, size_t max)
 {
 	size_t len;
 	for (len = 0; len < max && str[len]; len ++)
 		;
 	return len;
 }
-#endif
+
+int __attribute__((weak)) fls(int i)
+{
+	int j = 0;
+	while (i) {
+		i >>= 1;
+		j ++;
+	}
+	return j;
+}
 
 struct sockaddr_in *__string_sockaddr_in(const char *str,
 		struct sockaddr_in *sa)

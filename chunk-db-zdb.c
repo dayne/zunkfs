@@ -311,6 +311,7 @@ again:
 	default:
 		TRACE("node=%p failed\n", node);
 		kill_node(node);
+		r->state = request_pending;
 	}
 }
 

@@ -26,11 +26,21 @@
 #include "zunkfs.h"
 #include "chunk-db.h"
 
+struct forward_request {
+	int min_dist;
+	unsigned ref_count;
+	struct evbuffer *evbuf;
+	struct list_head request_entry;
+	unsigned char chunk_digest[CHUNK_DIGEST_LEN];
+	struct event timeout_event;
+	struct timeval timeout;
+};
+
 struct node {
 	int fd;
 	struct bufferevent *bev;
 	struct sockaddr_in addr;
-	struct list_head nd_entry;
+	struct list_head node_entry;
 	struct event connect_event;
 };
 
@@ -50,15 +60,17 @@ struct node {
 #define REQUEST_DONE_LEN	(sizeof(REQUEST_DONE) - 1)
 #define STORE_NODE		"store_node"
 #define STORE_NODE_LEN		(sizeof(STORE_NODE) - 1)
+#define FORWARD_CHUNK		"forward_chunk"
+#define FORWARD_CHUNK_LEN	(sizeof(FORWARD_CHUNK) - 1)
 
 #define NODE_VEC_MAX	5
 
 static LIST_HEAD(node_list);
 static LIST_HEAD(client_list);
+static LIST_HEAD(request_list);
 
 static char *prog;
 static struct sockaddr_in my_addr;
-static unsigned forward_stores = 0;
 static unsigned nr_chunkdbs = 0;
 static unsigned daemonize = 0;
 
@@ -72,12 +84,28 @@ static inline unsigned char *__data_digest(const void *buf, size_t len,
 
 #define data_digest(buf, len) __data_digest(buf, len, alloca(SHA_DIGEST_LENGTH))
 
-#define node_digest(node) data_digest(&(node)->addr, sizeof(struct sockaddr_in))
+static inline unsigned char *__node_digest(const struct node *node,
+		unsigned char *digest)
+{
+	struct {
+		uint16_t zero;
+		uint16_t port;
+		uint32_t ip;
+	} addr;
+
+	addr.zero = 0;
+	addr.port = node->addr.sin_port;
+	addr.ip = node->addr.sin_addr.s_addr;
+
+	return __data_digest(&addr, sizeof(addr), digest);
+}
+
+#define node_digest(node) __node_digest(node, alloca(SHA_DIGEST_LENGTH))
 
 static void free_node(struct node *node)
 {
 	event_del(&node->connect_event);
-	list_del(&node->nd_entry);
+	list_del(&node->node_entry);
 	close(node->fd);
 	bufferevent_free(node->bev);
 	free(node);
@@ -94,7 +122,7 @@ static int trim_nodes(void)
 	else
 		return 0;
 
-	free_node(list_entry(list->prev, struct node, nd_entry));
+	free_node(list_entry(list->prev, struct node, node_entry));
 	return 1;
 }
 
@@ -151,8 +179,15 @@ static int setup_node(struct node *node)
 
 static void nearest_nodes(const unsigned char *, struct evbuffer *, int);
 
+static inline int node_distance(const struct node *node,
+		const unsigned char *key)
+{
+	return digest_distance(key, node_digest(node));
+}
+
 static int connect_node(struct node *node)
 {
+	struct forward_request *r;
 	struct evbuffer *evbuf;
 
 	evbuf = evbuffer_new();
@@ -172,8 +207,34 @@ static int connect_node(struct node *node)
 	bufferevent_write_buffer(node->bev, evbuf);
 	evbuffer_free(evbuf);
 
+	list_for_each_entry(r, &request_list, request_entry) {
+		int d = node_distance(node, r->chunk_digest);
+		if (d < r->min_dist) {
+			if (bufferevent_write(node->bev,
+						EVBUFFER_DATA(r->evbuf),
+						EVBUFFER_LENGTH(r->evbuf)))
+				continue;
+			TRACE("forwarding %s to %s:%u (%d)\n", 
+					digest_string(r->chunk_digest),
+					node_addr_string(node),
+					node_port(node),
+					d);
+			r->ref_count ++;
+			r->min_dist = d;
+		}
+	}
+
 	connectcb(node->fd, EV_WRITE, node);
 	return 0;
+}
+
+static struct node *find_node(const struct sockaddr_in *addr)
+{
+	struct node *node;
+	list_for_each_entry(node, &node_list, node_entry)
+		if (node_is_addr(node, addr))
+			return node;
+	return NULL;
 }
 
 static int store_node(const struct sockaddr_in *addr)
@@ -181,9 +242,8 @@ static int store_node(const struct sockaddr_in *addr)
 	struct node *node;
 	int err;
 
-	list_for_each_entry(node, &node_list, nd_entry)
-		if (node_is_addr(node, addr))
-			return -EEXIST;
+	if (find_node(addr))
+		return -EEXIST;
 
 	node = malloc(sizeof(struct node));
 	if (!node)
@@ -204,7 +264,7 @@ again:
 
 	node->addr = *addr;
 
-	list_add_tail(&node->nd_entry, &node_list);
+	list_add_tail(&node->node_entry, &node_list);
 
 	TRACE("added node %s:%u\n", node_addr_string(node), node_port(node));
 
@@ -268,12 +328,6 @@ static int dns_resolve(char *addr_str)
 	return 0;
 }
 
-static inline int node_distance(const struct node *node,
-		const unsigned char *key)
-{
-	return digest_distance(key, node_digest(node));
-}
-
 static int __nearest_nodes(const unsigned char *key, struct node **node_vec,
 		int *dist_vec, int max)
 {
@@ -283,7 +337,7 @@ static int __nearest_nodes(const unsigned char *key, struct node **node_vec,
 	for (i = 0; i < max; i ++)
 		dist_vec[i] = INT_MAX;
 
-	list_for_each_entry(node, &node_list, nd_entry) {
+	list_for_each_entry(node, &node_list, node_entry) {
 		d = node_distance(node, key);
 		/* find maximum, and replace.. */
 		n = 0;
@@ -350,32 +404,77 @@ static int store_value(const char *value, unsigned char *digest)
 	return write_chunk(chunk, digest);
 }
 
-static void forward_value(const unsigned char *key, const char *encoded_value,
-		struct node *from_node)
+static void request_timeoutcb(int fd, short event, void *arg)
 {
-	struct node *node_vec[NODE_VEC_MAX];
-	int dist_vec[NODE_VEC_MAX];
-	struct evbuffer *buf;
-	int i, count, d;
+	struct forward_request *req = arg;
 
-	buf = evbuffer_new();
-	if (!buf)
-		return;
+	TRACE("forward request %s timedout.\n",
+			digest_string(req->chunk_digest));
 
-	d = node_distance(from_node, key);
-
-	count = __nearest_nodes(key, node_vec, dist_vec, NODE_VEC_MAX);
-	for (i = 0; i < count; i ++) {
-		if (d < dist_vec[i])
-			continue;
-		evbuffer_add_printf(buf, "%s %s\r\n", STORE_CHUNK,
-				encoded_value);
-		bufferevent_write_buffer(node_vec[i]->bev, buf);
-	}
-
-	evbuffer_free(buf);
+	list_del(&req->request_entry);
+	evbuffer_free(req->evbuf);
+	free(req);
 }
 
+static void forward_chunk(const char *value, const unsigned char *digest)
+{
+	struct forward_request *req;
+	struct node *node_vec[NODE_VEC_MAX];
+	int dist_vec[NODE_VEC_MAX];
+	int i, n;
+
+	req = malloc(sizeof(struct forward_request));
+	if (!req)
+		return;
+
+	req->evbuf = evbuffer_new();
+	if (!req->evbuf)
+		goto discard;
+
+	if (evbuffer_add_printf(req->evbuf, "%s %s\r\n", STORE_CHUNK,
+				value) < 0)
+		goto discard;
+
+	n = __nearest_nodes(digest, node_vec, dist_vec, NODE_VEC_MAX);
+	if (!n)
+		goto discard;
+
+	memcpy(req->chunk_digest, digest, CHUNK_DIGEST_LEN);
+	req->ref_count = 0;
+	req->min_dist = INT_MAX;
+
+	for (i = 0; i < n; i ++) {
+		if (bufferevent_write(node_vec[i]->bev,
+					EVBUFFER_DATA(req->evbuf),
+					EVBUFFER_LENGTH(req->evbuf)))
+			continue;
+		TRACE("forwarding %s to %s:%u (%d)\n", 
+				digest_string(digest),
+				node_addr_string(node_vec[i]),
+				node_port(node_vec[i]),
+				dist_vec[i]);
+		if (dist_vec[i] < req->min_dist)
+			req->min_dist = dist_vec[i];
+		req->ref_count ++;
+	}
+
+	if (!req->ref_count)
+		goto discard;
+
+	req->timeout.tv_sec = 10;
+	req->timeout.tv_usec = 0;
+
+	timeout_set(&req->timeout_event, request_timeoutcb, req);
+	timeout_add(&req->timeout_event, &req->timeout);
+
+	list_add(&req->request_entry, &request_list);
+
+	return;
+discard:
+	if (req->evbuf)
+		evbuffer_free(req->evbuf);
+	free(req);
+}
 
 static inline void request_done(const char *key_str, struct evbuffer *output)
 {
@@ -417,11 +516,7 @@ static void proc_msg(const char *buf, size_t len, struct node *node)
 			return;
 		}
 
-		if (forward_stores)
-			forward_value(digest, msg, node);
-		else
-			nearest_nodes(digest, output, NODE_VEC_MAX);
-
+		nearest_nodes(digest, output, NODE_VEC_MAX);
 		request_done(digest_string(digest), output);
 
 	} else if (!strncmp(msg, STORE_NODE, STORE_NODE_LEN)) {
@@ -438,6 +533,43 @@ static void proc_msg(const char *buf, size_t len, struct node *node)
 			addr->sin_addr = node->addr.sin_addr;
 
 		store_node(addr);
+
+	} else if (!strncmp(msg, FORWARD_CHUNK, FORWARD_CHUNK_LEN)) {
+		msg += FORWARD_CHUNK_LEN + 1;
+		len -= FORWARD_CHUNK_LEN - 1;
+
+		if (store_value(msg, digest) != CHUNK_SIZE) {
+			free_node(node);
+			return;
+		}
+
+		forward_chunk(msg, digest);
+		request_done(digest_string(digest), output);
+
+	} else if (!strncmp(msg, REQUEST_DONE, REQUEST_DONE_LEN)) {
+		struct forward_request *r;
+
+		msg += REQUEST_DONE_LEN + 1;
+		len -= REQUEST_DONE_LEN - 1;
+
+		__string_digest(msg, digest);
+
+		list_for_each_entry(r, &request_list, request_entry) {
+			if (!memcmp(digest, r->chunk_digest, CHUNK_DIGEST_LEN)) {
+				if (!--r->ref_count) {
+					TRACE("forward request complete %s\n",
+							digest_string(r->chunk_digest));
+					list_del(&r->request_entry);
+					event_del(&r->timeout_event);
+					evbuffer_free(r->evbuf);
+					free(r);
+				}
+				break;
+			}
+		}
+
+		evbuffer_free(output);
+		return;
 	}
 
 	bufferevent_write_buffer(node->bev, output);
@@ -463,7 +595,8 @@ static void readcb(struct bufferevent *bev, void *arg)
 static void errorcb(struct bufferevent *bev, short what, void *arg)
 {
 	struct node *cl = arg;
-	TRACE("client disconnected: %p\n", cl);
+	TRACE("client disconnected: %p %s:%u\n", cl, node_addr_string(cl),
+			node_port(cl));
 	free_node(cl);
 }
 
@@ -495,7 +628,7 @@ again:
 	if (err)
 		return;
 
-	list_add(&cl->nd_entry, &client_list);
+	list_add(&cl->node_entry, &client_list);
 
 	bufferevent_enable(cl->bev, EV_READ | EV_WRITE);
 
@@ -507,7 +640,6 @@ enum {
 	OPT_HELP = 'h',
 	OPT_PEER = 'p',
 	OPT_ADDR = 'a',
-	OPT_FORWORD_STORES = 'f',
 	OPT_LOG = 'l',
 	OPT_CHUNK_DB = 'c',
 	OPT_DAEMONIZE = 'd'
@@ -517,7 +649,6 @@ static const char short_opts[] = {
 	OPT_HELP,
 	OPT_PEER, OPT_REQUIRED_ARG,
 	OPT_ADDR, OPT_REQUIRED_ARG,
-	OPT_FORWORD_STORES,
 	OPT_LOG, OPT_REQUIRED_ARG,
 	OPT_CHUNK_DB, OPT_REQUIRED_ARG,
 	OPT_DAEMONIZE,
@@ -528,7 +659,6 @@ static const struct option long_opts[] = {
 	{ "help", no_argument, NULL, OPT_HELP },
 	{ "peer", required_argument, NULL, OPT_PEER },
 	{ "addr", required_argument, NULL, OPT_ADDR },
-	{ "forward-store", no_argument, NULL, OPT_FORWORD_STORES },
 	{ "chunk-db", required_argument, NULL, OPT_CHUNK_DB },
 	{ "daemonize", no_argument, NULL, OPT_DAEMONIZE },
 	{ NULL }
@@ -538,8 +668,6 @@ static const struct option long_opts[] = {
 "-h|--help\n"\
 "-p|--peer <(ip|hostname):port>    Connect to this peer.\n"\
 "-a|--addr <[ip]:port>             Listen on specified IP and port.\n"\
-"-f|--forward-store                Automatically forward store requests,\n"\
-"                                  and don't send nearest nodes as a reply.\n"\
 "-l|--log [level,]<file>           Enable logging of (E)rrors, (W)arnings,\n"\
 "                                  (T)races to a file. File can be a path,\n"\
 "                                  stdout, or stderr.\n"\
@@ -579,10 +707,6 @@ static int proc_opt(int opt, char *arg)
 		}
 
 		my_addr = *sa;
-		return 0;
-
-	case OPT_FORWORD_STORES:
-		forward_stores = 1;
 		return 0;
 
 	case OPT_LOG:

@@ -248,8 +248,8 @@ int init_chunk_tree(struct chunk_tree *ctree, unsigned nr_leafs,
 
 	nr_leafs -= !!nr_leafs;
 
-	/* ffs(x) ~= log2(x) + 1 */
-	ctree->height = (ffs(nr_leafs) - 1) / (fls(DIGESTS_PER_CHUNK) - 1);
+	/* fls(x) ~= log2(x) + 1 */
+	ctree->height = (fls(nr_leafs) - 1) / (fls(DIGESTS_PER_CHUNK) - 1);
 	ctree->height += !!nr_leafs;
 
 	root = new_chunk_node(ctree, root_digest, !ctree->height);

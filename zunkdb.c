@@ -518,6 +518,25 @@ static inline void request_done(const char *key_str, struct evbuffer *output)
 	evbuffer_add_printf(output, "%s %s\r\n", REQUEST_DONE, key_str);
 }
 
+static void finish_request(const unsigned char *digest)
+{
+	struct forward_request *r;
+
+	list_for_each_entry(r, &request_list, request_entry)
+		if (!memcmp(digest, r->chunk_digest, CHUNK_DIGEST_LEN))
+			goto found;
+	return;
+found:
+	if (!--r->ref_count) {
+		TRACE("forward request complete %s\n",
+				digest_string(r->chunk_digest));
+		list_del(&r->request_entry);
+		event_del(&r->timeout_event);
+		evbuffer_free(r->evbuf);
+		free(r);
+	}
+}
+
 static void proc_msg(const char *buf, size_t len, struct node *node)
 {
 	unsigned char digest[SHA_DIGEST_LENGTH];
@@ -584,26 +603,11 @@ static void proc_msg(const char *buf, size_t len, struct node *node)
 		request_done(digest_string(digest), output);
 
 	} else if (!strncmp(msg, REQUEST_DONE, REQUEST_DONE_LEN)) {
-		struct forward_request *r;
-
 		msg += REQUEST_DONE_LEN + 1;
 		len -= REQUEST_DONE_LEN - 1;
 
 		__string_digest(msg, digest);
-
-		list_for_each_entry(r, &request_list, request_entry) {
-			if (!memcmp(digest, r->chunk_digest, CHUNK_DIGEST_LEN)) {
-				if (!--r->ref_count) {
-					TRACE("forward request complete %s\n",
-							digest_string(r->chunk_digest));
-					list_del(&r->request_entry);
-					event_del(&r->timeout_event);
-					evbuffer_free(r->evbuf);
-					free(r);
-				}
-				break;
-			}
-		}
+		finish_request(digest);
 
 		evbuffer_free(output);
 		return;

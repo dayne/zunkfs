@@ -38,12 +38,12 @@ static const struct option long_opts[] = {
 };
 
 #define USAGE \
-"-s|--store                        Store chunk provided via stdin.\n"\
-"-f|--find                         Find chunk matching digests on command line.\n"\
-"-d|--db <chunk-db-spec>           Add a chunk-db\n"\
-"-l|--log [level,]<file>           Enable logging of (E)rrors, (W)arnings,\n"\
-"                                  (T)races to a file. File can be a path,\n"\
-"                                  stdout, or stderr.\n"\
+"-s|--store                     Store chunk provided via stdin.\n"\
+"-f|--find                      Find chunk matching digests on command line.\n"\
+"-d|--db <chunk-db-spec>        Add a chunk-db\n"\
+"-l|--log [level,]<file>        Enable logging of (E)rrors, (W)arnings,\n"\
+"                               (T)races to a file. File can be a path,\n"\
+"                               stdout, or stderr.\n"\
 "\nChunk-db specs:\n"
 
 static const char *prog;
@@ -65,8 +65,8 @@ static int proc_opt(int opt, char *arg)
 	switch(opt) {
 	case OPT_STORE:
 		if (optype != INVALID) {
-			fprintf(stderr, "Operation can be either store or find, "
-					"not both.\n");
+			fprintf(stderr, "Operation can be either store or find,"
+					" not both.\n");
 			return -EINVAL;
 		}
 		optype = STORE;
@@ -74,8 +74,8 @@ static int proc_opt(int opt, char *arg)
 
 	case OPT_FIND:
 		if (optype != INVALID) {
-			fprintf(stderr, "Operation can be either store or find, "
-					"not both.\n");
+			fprintf(stderr, "Operation can be either store or find,"
+					" not both.\n");
 			return -EINVAL;
 		}
 		optype = FIND;
@@ -173,13 +173,15 @@ int main(int argc, char **argv)
 	}
 
 	if (!nr_dbs) {
-		fprintf(stderr, "Must specify at least one chunk database.\n\n");
+		fprintf(stderr, "Must specify at least one chunk database."
+				"\n\n");
 		usage(-1);
 	}
 
 	if (optype == STORE) {
 		if (optind == argc) {
-			fprintf(stderr, "Must provide at least one file to store.\n");
+			fprintf(stderr, "Must provide at least one file to "
+					"store.\n");
 			usage(-1);
 		}
 		for (; optind < argc; optind ++) {
@@ -187,7 +189,8 @@ int main(int argc, char **argv)
 
 			fd = open(argv[optind], O_RDONLY);
 			if (fd < 0) {
-				fprintf(stderr, "Can't open %s: %s\n", argv[optind],
+				fprintf(stderr, "Can't open %s: %s\n",
+						argv[optind],
 						strerror(errno));
 				continue;
 			}
@@ -199,14 +202,16 @@ int main(int argc, char **argv)
 		}
 	} else {
 		if (optind == argc) {
-			fprintf(stderr, "Must provide at least one digest to find.\n");
+			fprintf(stderr, "Must provide at least one digest to "
+					"find.\n");
 			usage(-1);
 		}
 		for (;optind < argc; optind ++) {
 			unsigned char digest[CHUNK_DIGEST_LEN];
 
 			if (IS_ERR(__string_digest(argv[optind], digest))) {
-				fprintf(stderr, "Invalid chunk digest: %s\n", argv[optind]);
+				fprintf(stderr, "Invalid chunk digest: %s\n",
+						argv[optind]);
 				continue;
 			}
 

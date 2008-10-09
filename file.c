@@ -178,6 +178,7 @@ static inline void cache_file_chunk(struct open_file *ofile, struct chunk_node *
 static int rw_file(struct open_file *ofile, char *buf, size_t bufsz,
 		off_t offset, int read)
 {
+	unsigned cache = !S_ISDIR(ofile->dentry->ddent->mode);
 	struct chunk_node *cnode;
 	unsigned chunk_nr;
 	unsigned chunk_off;
@@ -218,7 +219,11 @@ static int rw_file(struct open_file *ofile, char *buf, size_t bufsz,
 			cnode->dirty = 1;
 		}
 		len += cplen;
-		cache_file_chunk(ofile, cnode);
+
+		if (cache)
+			cache_file_chunk(ofile, cnode);
+		else
+			put_chunk_node(cnode);
 
 		chunk_nr ++;
 		chunk_off = 0;

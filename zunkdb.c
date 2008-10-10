@@ -75,6 +75,8 @@ static unsigned nr_chunkdbs = 0;
 static unsigned daemonize = 0;
 static unsigned may_promote = 0;
 static struct timeval forward_timeout = {60, 0};
+static unsigned max_forwards = 1000;
+static unsigned pending_forwards = 0;
 
 static inline unsigned char *__data_digest(const void *buf, size_t len,
 		unsigned char *digest)
@@ -449,6 +451,8 @@ static void request_timeoutcb(int fd, short event, void *arg)
 	TRACE("forward request %s timedout.\n",
 			digest_string(req->chunk_digest));
 
+	pending_forwards --;
+
 	list_del(&req->request_entry);
 	evbuffer_free(req->evbuf);
 	free(req);
@@ -460,6 +464,9 @@ static void forward_chunk(const char *value, const unsigned char *digest)
 	struct node *node_vec[NODE_VEC_MAX];
 	int dist_vec[NODE_VEC_MAX];
 	int i, n;
+
+	if (pending_forwards >= max_forwards)
+		return;
 
 	req = malloc(sizeof(struct forward_request));
 	if (!req)
@@ -505,6 +512,7 @@ static void forward_chunk(const char *value, const unsigned char *digest)
 	timeout_add(&req->timeout_event, &req->timeout);
 
 	list_add(&req->request_entry, &request_list);
+	pending_forwards ++;
 
 	return;
 discard:
@@ -534,6 +542,7 @@ found:
 		event_del(&r->timeout_event);
 		evbuffer_free(r->evbuf);
 		free(r);
+		pending_forwards --;
 	}
 }
 
@@ -686,6 +695,7 @@ enum {
 	OPT_DAEMONIZE = 'd',
 	OPT_PROMOTE = 'o',
 	OPT_FORWARD_TIMEOUT = 't',
+	OPT_MAX_FORWARD = 'x',
 };
 
 static const char short_opts[] = {
@@ -697,6 +707,7 @@ static const char short_opts[] = {
 	OPT_DAEMONIZE,
 	OPT_PROMOTE,
 	OPT_FORWARD_TIMEOUT, OPT_REQUIRED_ARG,
+	OPT_MAX_FORWARD, OPT_REQUIRED_ARG,
 	0
 };
 
@@ -708,6 +719,7 @@ static const struct option long_opts[] = {
 	{ "daemonize", no_argument, NULL, OPT_DAEMONIZE },
 	{ "promote-nodes", no_argument, NULL, OPT_PROMOTE },
 	{ "forward-timeout", required_argument, NULL, OPT_FORWARD_TIMEOUT },
+	{ "max-forwards", required_argument, NULL, OPT_MAX_FORWARD },
 	{ NULL }
 };
 
@@ -722,6 +734,9 @@ static const struct option long_opts[] = {
 "-d|--daemonize                    Fork into background.\n"\
 "-o|--promote-nodes                Allow promoting client nodes to server nodes.\n"\
 "-t|--forward-timeout <seconds>    Maximum duration of a forward request.\n"\
+"                                  Default = 60.\n"\
+"-x|--max-forwards <count>         Maximum number of pending forwards.\n"\
+"                                  Use to limit memory usage. Default = 1000\n"\
 "\nChunk-db specs:\n"
 
 static void usage(int exit_code)
@@ -787,6 +802,10 @@ static int proc_opt(int opt, char *arg)
 
 	case OPT_FORWARD_TIMEOUT:
 		forward_timeout.tv_sec = atoi(optarg);
+		return 0;
+
+	case OPT_MAX_FORWARD:
+		max_forwards = atoi(optarg);
 		return 0;
 
 	default:

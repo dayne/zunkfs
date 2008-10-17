@@ -102,39 +102,30 @@ static int read_chunk_sqlite(unsigned char *chunk, const unsigned char *digest,
 	return ret;
 }
 
-static struct chunk_db *sqlite_chunkdb_ctor(int mode, const char *spec)
+static int sqlite_chunkdb_ctor(const char *spec, struct chunk_db *chunk_db)
 {
-	struct chunk_db *cdb;
-	struct db_info *db_info;
-	int err;
+	struct db_info *db_info = chunk_db->db_info;
+	int error;
 
-	if (strncmp(spec, "sqlite:", 7))
-		return NULL;
-
-	cdb = malloc(sizeof(struct chunk_db) + sizeof(struct db_info));
-	if (!cdb)
-		return ERR_PTR(ENOMEM);
-
-	db_info = cdb->db_info = (void *)(cdb + 1);
 	init_mutex(&db_info->mutex);
 
-	err = sqlite3_open(spec + 7, &db_info->db);
-	if (err != SQLITE_OK) {
+	error = sqlite3_open(spec, &db_info->db);
+	if (error != SQLITE_OK) {
 		fprintf(stderr, "Can't open SQLite database '%s': %s\n",
-				spec + 7, sqlite3_errmsg(db_info->db));
+				spec, sqlite3_errmsg(db_info->db));
 		sqlite3_close(db_info->db);
-		free(cdb);
-		return ERR_PTR(EINVAL);
+		return -EINVAL;
 	}
 
-	cdb->read_chunk = read_chunk_sqlite;
-	cdb->write_chunk = (mode == CHUNKDB_RO) ? NULL : write_chunk_sqlite;
-
-	return cdb;
+	return 0;
 }
 
 static struct chunk_db_type sqlite_chunkdb_type = {
+	.spec_prefix = "sqlite:",
 	.ctor = sqlite_chunkdb_ctor,
+	.read_chunk = read_chunk_sqlite,
+	.write_chunk = write_chunk_sqlite,
+	.info_size = sizeof(struct db_info),
 	.help =
 "   sqlite:<database>       SQLite storage for chunks. Database schema:\n"
 "                              CREATE TABLE chunk (\n"
@@ -143,8 +134,4 @@ static struct chunk_db_type sqlite_chunkdb_type = {
 "                              );\n"
 };
 
-static void __attribute__((constructor)) init_sqlite_chunkdb(void)
-{
-	register_chunkdb(&sqlite_chunkdb_type);
-}
-
+REGISTER_CHUNKDB(sqlite_chunkdb_type);

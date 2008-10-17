@@ -95,46 +95,35 @@ static int local_write_chunk(const unsigned char *chunk,
 	return CHUNK_SIZE;
 }
 
-static struct chunk_db *local_chunkdb_ctor(int mode, const char *spec)
+static int local_chunkdb_ctor(const char *spec, struct chunk_db *cdb)
 {
-	struct chunk_db *cdb;
 	struct stat stbuf;
 	int err;
 
-	if (strncmp(spec, "dir:", 4))
-		return NULL;
+	TRACE("mode=0x%x spec=%s\n", cdb->mode, spec);
 
-	TRACE("mode=%d spec=%s\n", mode, spec);
-
-	err = stat(spec+4, &stbuf);
+	err = stat(spec, &stbuf);
 	if (err == -1)
-		return ERR_PTR(errno);
+		return -errno;
 	if (!S_ISDIR(stbuf.st_mode))
-		return ERR_PTR(ENOTDIR);
-	if (access(spec+4, R_OK | (mode == CHUNKDB_RW ? W_OK : 0)))
-		return ERR_PTR(errno);
+		return -ENOTDIR;
+	if (access(spec, R_OK | ((cdb->mode & CHUNKDB_RW) ? W_OK : 0)))
+		return errno;
 
-	cdb = malloc(sizeof(struct chunk_db) + strlen(spec+4) + 1);
-	if (!cdb)
-		return ERR_PTR(ENOMEM);
+	cdb->db_info = (void *)spec;
 
-	cdb->db_info = (void *)(cdb + 1);
-	strcpy(cdb->db_info, spec+4);
-
-	cdb->read_chunk = local_read_chunk;
-	cdb->write_chunk = (mode == CHUNKDB_RO) ? NULL : local_write_chunk;
-
-	return cdb;
+	return 0;
 }
 
 static struct chunk_db_type local_chunkdb_type = {
+	.spec_prefix = "dir:",
+	.info_size = 0,
 	.ctor = local_chunkdb_ctor,
+	.read_chunk = local_read_chunk,
+	.write_chunk = local_write_chunk,
 	.help =
 "   dir:<path>              Chunks are stored in specified directory.\n"
 };
 
-static void __attribute__((constructor)) init_chunkdb_local(void)
-{
-	register_chunkdb(&local_chunkdb_type);
-}
+REGISTER_CHUNKDB(local_chunkdb_type);
 

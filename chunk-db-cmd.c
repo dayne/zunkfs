@@ -122,37 +122,25 @@ static int cmd_write_chunk(const unsigned char *chunk,
 			(xfer_fn)write, STDIN_FILENO, db_info);
 }
 
-static struct chunk_db *cmd_chunkdb_ctor(int mode, const char *spec)
+static int cmd_chunkdb_ctor(const char *spec, struct chunk_db *cdb)
 {
-	struct chunk_db *cdb;
-
-	if (strncmp(spec, "cmd:", 4))
-		return NULL;
-
-	spec += 4;
-
-	TRACE("mode=%d spec=%s\n", mode, spec);
+	TRACE("mode=0x%x spec=%s\n", cdb->mode, spec);
 
 	if (access(spec, X_OK)) {
 		WARNING("%s is not executable: %s\n", spec, strerror(errno));
-		return ERR_PTR(errno);
+		return -errno;
 	}
 
-	cdb = malloc(sizeof(struct chunk_db) + strlen(spec) + 1);
-	if (!cdb)
-		return ERR_PTR(ENOMEM);
+	cdb->db_info = (void *)spec;
 
-	cdb->db_info = (void *)(cdb + 1);
-	strcpy(cdb->db_info, spec);
-
-	cdb->read_chunk = cmd_read_chunk;
-	cdb->write_chunk = (mode == CHUNKDB_RO) ? NULL : cmd_write_chunk;
-
-	return cdb;
+	return 0;
 }
 
 static struct chunk_db_type cmd_chunkdb_type = {
+	.spec_prefix = "cmd:",
 	.ctor = cmd_chunkdb_ctor,
+	.read_chunk = cmd_read_chunk,
+	.write_chunk = cmd_write_chunk,
 	.help =
 "   cmd:<command>           <command> is a full path to a program which takes\n"
 "                           a chunk hash as its only argument, and outputs\n"

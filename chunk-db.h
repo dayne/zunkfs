@@ -3,23 +3,17 @@
 
 #include "list.h"
 
-/*
- * Chunk database.
- */
-struct chunk_db {
+struct chunk_db;
+
+struct chunk_db_type {
+	const char *spec_prefix;
+	unsigned info_size;
+	struct list_head type_entry;
+	int (*ctor)(const char *spec, struct chunk_db *chunk_db);
 	int (*read_chunk)(unsigned char *chunk, const unsigned char *digest,
 			void *db_info);
 	int (*write_chunk)(const unsigned char *chunk,
 			const unsigned char *digest, void *db_info);
-	int mode;
-	void *db_info;
-	struct list_head db_entry;
-};
-
-typedef struct chunk_db *(*chunkdb_ctor)(int mode, const char *spec);
-
-struct chunk_db_type {
-	chunkdb_ctor ctor;
 	/*
 	 * Help string. Format is:
 	 * <spec>   <description>.
@@ -28,7 +22,16 @@ struct chunk_db_type {
 	 * A help line should not exceed 80 characters.
 	 */
 	const char *help;
-	struct list_head type_entry;
+};
+
+/*
+ * Chunk database.
+ */
+struct chunk_db {
+	struct chunk_db_type *type;
+	int mode;
+	void *db_info;
+	struct list_head db_entry;
 };
 
 #define CHUNKDB_RO 0 /* read-only */
@@ -40,6 +43,12 @@ void register_chunkdb(struct chunk_db_type *type);
 int add_chunkdb(const char *spec);
 
 void help_chunkdb(void);
+
+#define REGISTER_CHUNKDB(type) \
+static void __attribute__((constructor)) register_chunkdb_##type(void) \
+{ \
+	register_chunkdb(&type); \
+}
 
 #endif
 

@@ -50,6 +50,9 @@ int random_chunk_digest(unsigned char *digest)
 
 void register_chunkdb(struct chunk_db_type *type)
 {
+	assert(type->spec_prefix);
+	assert(type->ctor != NULL);
+	assert(type->help != NULL);
 	list_add_tail(&type->type_entry, &chunkdb_types);
 }
 
@@ -57,7 +60,7 @@ int add_chunkdb(const char *spec)
 {
 	struct chunk_db_type *type;
 	struct chunk_db *cdb;
-	int mode;
+	int mode, error;
 
 	if (!strncmp(spec, "ro,", 3)) {
 		mode = CHUNKDB_RO;
@@ -84,19 +87,33 @@ int add_chunkdb(const char *spec)
 	}
 
 	list_for_each_entry(type, &chunkdb_types, type_entry) {
-		cdb = type->ctor(mode, spec);
-		if (cdb)
+		if (!strncmp(spec, type->spec_prefix, 
+					strlen(type->spec_prefix)))
 			goto found;
 	}
 
 	return -ENOENT;
 found:
-	if (IS_ERR(cdb))
-		return -PTR_ERR(cdb);
+	if ((mode & (CHUNKDB_RO|CHUNKDB_RW)) && !type->read_chunk)
+		return -EINVAL;
+	if ((mode & CHUNKDB_RW) && !type->write_chunk)
+		return -EINVAL;
+
+	cdb = malloc(sizeof(struct chunk_db) + type->info_size);
+	if (!cdb)
+		return -ENOMEM;
+
+	cdb->type = type;
+	cdb->mode = mode;
+	cdb->db_info = (void *)(cdb + 1);
+
+	error = type->ctor(spec + strlen(type->spec_prefix), cdb);
+	if (error) {
+		free(cdb);
+		return error;
+	}
 
 	list_add_tail(&cdb->db_entry, &chunkdb_list);
-
-	cdb->mode = mode;
 
 	return 0;
 }
@@ -113,11 +130,13 @@ void help_chunkdb(void)
 int read_chunk(unsigned char *chunk, const unsigned char *digest)
 {
 	struct chunk_db *cdb;
+	struct chunk_db_type *type;
 	int len;
 
 	list_for_each_entry(cdb, &chunkdb_list, db_entry) {
-		if (cdb->read_chunk) {
-			len = cdb->read_chunk(chunk, digest, cdb->db_info);
+		type = cdb->type;
+		if ((cdb->mode & (CHUNKDB_RO|CHUNKDB_RW))) {
+			len = type->read_chunk(chunk, digest, cdb->db_info);
 			if (len > 0 && verify_chunk(chunk, digest))
 				goto cache_chunk;
 		}
@@ -130,8 +149,9 @@ cache_chunk:
 		cdb = list_prev_entry(cdb, db_entry);
 		if (&cdb->db_entry == &chunkdb_list)
 			break;
-		if (cdb->write_chunk && !(cdb->mode & CHUNKDB_NC))
-			cdb->write_chunk(chunk, digest, cdb->db_info);
+		type = cdb->type;
+		if ((cdb->mode & (CHUNKDB_RW|CHUNKDB_NC)) == CHUNKDB_RW)
+			type->write_chunk(chunk, digest, cdb->db_info);
 	}
 
 	return len;
@@ -140,6 +160,7 @@ cache_chunk:
 int write_chunk(const unsigned char *chunk, unsigned char *digest)
 {
 	struct chunk_db *cdb;
+	struct chunk_db_type *type;
 	int n, ret;
 
 	digest_chunk(chunk, digest);
@@ -148,11 +169,12 @@ int write_chunk(const unsigned char *chunk, unsigned char *digest)
 
 	ret = -EIO;
 	list_for_each_entry(cdb, &chunkdb_list, db_entry) {
-		if (cdb->write_chunk) {
-			n = cdb->write_chunk(chunk, digest, cdb->db_info);
+		type = cdb->type;
+		if ((cdb->mode & CHUNKDB_RW)) {
+			n = type->write_chunk(chunk, digest, cdb->db_info);
 			if (n > ret)
 				ret = n;
-			if (ret > 0 && (cdb->mode & CHUNKDB_WT) == 0)
+			if (ret > 0 && !(cdb->mode & CHUNKDB_WT))
 				return ret;
 		}
 	}

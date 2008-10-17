@@ -664,22 +664,9 @@ static int parse_spec(const char *spec, struct zdb_info *zdb_info)
 	return 0;
 }
 
-static struct chunk_db *zdb_chunkdb_ctor(int mode, const char *spec)
+static int zdb_chunkdb_ctor(const char *spec, struct chunk_db *chunk_db)
 {
-	struct chunk_db *cdb;
-	struct zdb_info *zdb_info;
-	int err;
-
-	spec = suffix(spec, "zunkdb:");
-	if (!spec)
-		return NULL;
-
-	cdb = malloc(sizeof(struct chunk_db) + sizeof(struct zdb_info));
-	if (!cdb)
-		return ERR_PTR(ENOMEM);
-
-	zdb_info = (void *)(cdb + 1);
-	cdb->db_info = zdb_info;
+	struct zdb_info *zdb_info = chunk_db->db_info;
 
 	zdb_info->request_timeout.tv_sec = 60;
 	zdb_info->request_timeout.tv_usec = 0;
@@ -689,19 +676,15 @@ static struct chunk_db *zdb_chunkdb_ctor(int mode, const char *spec)
 
 	zdb_info->store_method = FORWARD_CHUNK;
 
-	cdb->read_chunk = zdb_read_chunk;
-	cdb->write_chunk = (mode == CHUNKDB_RO) ? NULL : zdb_write_chunk;
-
-	err = parse_spec(spec, zdb_info);
-	if (!err)
-		return cdb;
-
-	free(cdb);
-	return ERR_PTR(err);
+	return parse_spec(spec, zdb_info);
 }
 
 static struct chunk_db_type zdb_chunkdb_type = {
+	.spec_prefix = "zunkdb:",
+	.info_size = sizeof(struct zdb_info),
 	.ctor = zdb_chunkdb_ctor,
+	.read_chunk = zdb_read_chunk,
+	.write_chunk = zdb_write_chunk,
 	.help =
 "   zunkdb:<node>[,opts]    Use a \"zunk\" database for chunk storage.\n"
 "                           Initial node is passed in as <ip|name>:<port>.\n"
@@ -714,8 +697,4 @@ static struct chunk_db_type zdb_chunkdb_type = {
 "                                         chunk to multiple zunkdb nodes.\n"
 };
 
-static void __attribute__((constructor)) init_chunkdb_zdb(void)
-{
-	register_chunkdb(&zdb_chunkdb_type);
-}
-
+REGISTER_CHUNKDB(zdb_chunkdb_type);

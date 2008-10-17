@@ -140,46 +140,31 @@ static int map_read_chunk(unsigned char *chunk, const unsigned char *digest,
 	return err;
 }
 
-static struct chunk_db *map_chunkdb_ctor(int mode, const char *spec)
+static int map_chunkdb_ctor(const char *spec, struct chunk_db *chunk_db)
 {
-	struct chunk_db *chunk_db;
-	struct db_info *db_info;
-	int err;
+	struct db_info *db_info = chunk_db->db_info;
+	int error;
 
-	if (strncmp(spec, "map:sqlite:", 11))
-		return NULL;
-	if (mode != CHUNKDB_RO)
-		return ERR_PTR(EINVAL);
-
-	spec += 11;
-
-	chunk_db = malloc(sizeof(struct chunk_db) + sizeof(struct db_info));
-	if (!chunk_db)
-		return ERR_PTR(ENOMEM);
-
-	db_info = (void *)(chunk_db + 1);
 	db_info->db_name = spec;
 	db_info->query_map = query_map_sqlite3;
-	chunk_db->db_info = db_info;
 
-	err = sqlite3_open(db_info->db_name, &db_info->sqlite3_db);
-	if (err != SQLITE_OK) {
+	error = sqlite3_open(db_info->db_name, &db_info->sqlite3_db);
+	if (error != SQLITE_OK) {
 		fprintf(stderr, "Can't open SQLite database '%s': %s\n",
 				db_info->db_name,
 				sqlite3_errmsg(db_info->sqlite3_db));
-		free(chunk_db);
 		sqlite3_close(db_info->sqlite3_db);
-		return ERR_PTR(EINVAL);
+		return -EINVAL;
 	}
 
-	chunk_db->read_chunk = map_read_chunk;
-	chunk_db->write_chunk = NULL;
-
-	return chunk_db;
+	return 0;
 }
 
 static struct chunk_db_type map_chunkdb_type = {
+	.spec_prefix = "map:sqlite:",
 	.ctor = map_chunkdb_ctor,
+	.read_chunk = map_read_chunk,
+	.info_size = sizeof(struct db_info),
 	.help =
 "   map:sqlite:<db>         Use an SQLite database to store mapping between\n"
 "                           (path, offset) and chunk hash. The database\n"
@@ -191,8 +176,5 @@ static struct chunk_db_type map_chunkdb_type = {
 "                              );\n"
 };
 
-static __attribute__((constructor)) void map_chunkdb_init(void)
-{
-	register_chunkdb(&map_chunkdb_type);
-}
+REGISTER_CHUNKDB(map_chunkdb_type);
 

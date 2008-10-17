@@ -87,20 +87,12 @@ out:
 	return ret;
 }
 
-static struct chunk_db *mem_chunkdb_ctor(int mode, const char *spec)
+static int mem_chunkdb_ctor(const char *spec, struct chunk_db *chunk_db)
 {
-	struct chunk_db *cdb;
-	struct cache *cache;
+	struct cache *cache = chunk_db->db_info;
 
-	if (strncmp(spec, "mem:", 4) || mode != CHUNKDB_RW)
-		return NULL;
-
-	cdb = malloc(sizeof(struct chunk_db) + sizeof(struct cache));
-	if (!cdb)
-		panic("Failed to allocate chunk_db.\n");
-
-	cdb->db_info = (void *)(cdb + 1);
-	cache = cdb->db_info;
+	if (!(chunk_db->mode & CHUNKDB_RW))
+		return -EINVAL;
 
 	list_head_init(&cache->chunk_list);
 	init_mutex(&cache->mutex);
@@ -108,28 +100,25 @@ static struct chunk_db *mem_chunkdb_ctor(int mode, const char *spec)
 	cache->count = 0;
 	cache->max = -1;
 
-	if (spec[4]) {
-		cache->max = atol(spec + 4);
+	if (spec[0]) {
+		cache->max = atol(spec);
 		if (!cache->max)
 			cache->max = -1;
 	}
 
-	cdb->read_chunk = mem_read_chunk;
-	cdb->write_chunk = (mode == CHUNKDB_RO) ? NULL : mem_write_chunk;
-
-	return cdb;
+	return 0;
 }
 
 static struct chunk_db_type mem_chunkdb_type = {
+	.spec_prefix = "mem:",
+	.info_size = sizeof(struct cache),
 	.ctor = mem_chunkdb_ctor,
+	.read_chunk = mem_read_chunk,
+	.write_chunk = mem_write_chunk,
 	.help =
 "   mem:[max]               Dummy chunk database that stores all chunks in\n"
 "                           memory. To limit memory usage, set max to\n"
 "                           maximum number of chunks that can be cached.\n"
 };
 
-static void __attribute__((constructor)) init_chunkdb_mem(void)
-{
-	register_chunkdb(&mem_chunkdb_type);
-}
-
+REGISTER_CHUNKDB(mem_chunkdb_type);

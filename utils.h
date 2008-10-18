@@ -7,6 +7,7 @@
 
 extern size_t strnlen(const char *s, size_t maxlen);
 extern int fls(int i);
+extern void sranddev(void);
 
 /*
  * Logging

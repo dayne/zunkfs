@@ -13,6 +13,9 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <arpa/inet.h>
+#include <unistd.h>
+#include <sys/time.h>
+#include <fcntl.h>
 
 #include "utils.h"
 #include "mutex.h"
@@ -111,6 +114,41 @@ int __attribute__((weak)) fls(int i)
 		j ++;
 	}
 	return j;
+}
+
+static int __sranddev(const char *dev)
+{
+	unsigned seed;
+	int fd;
+	ssize_t n;
+
+	fd = open(dev, O_RDONLY);
+	if (fd < 0)
+		return -errno;
+
+	n = read(fd, &seed, sizeof(unsigned));
+	if (n < 0) {
+		int error = -errno;
+		close(fd);
+		return error;
+	}
+
+	srand(seed);
+	close(fd);
+	return 0;
+}
+
+void __attribute__((weak)) sranddev(void)
+{
+	struct timeval tv;
+
+	if (!__sranddev("/dev/urandom"))
+		return;
+	if (!__sranddev("/dev/random"))
+		return;
+
+	gettimeofday(&tv, NULL);
+	srand(tv.tv_usec);
 }
 
 struct sockaddr_in *__string_sockaddr_in(const char *str,

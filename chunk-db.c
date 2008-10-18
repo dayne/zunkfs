@@ -48,6 +48,11 @@ int random_chunk_digest(unsigned char *digest)
 	return write_chunk((void *)chunk_data, digest);
 }
 
+static void __attribute__((constructor)) seed_random_number_generator(void)
+{
+	sranddev();
+}
+
 void register_chunkdb(struct chunk_db_type *type)
 {
 	assert(type->spec_prefix);

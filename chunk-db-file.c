@@ -63,10 +63,6 @@ static inline unsigned char *__map_chunk(struct db *db, uint32_t nr,
 	return chunk;
 }
 
-#ifndef MAP_NOCACHE /* OSX flag */
-#define MAP_NOCACHE 0
-#endif
-
 /*
  * Take some premature optimizations:
  * - don't prolong caching of the chunk
@@ -74,17 +70,17 @@ static inline unsigned char *__map_chunk(struct db *db, uint32_t nr,
  */
 static inline void *map_chunk(struct db *db, uint32_t nr)
 {
+	void *chunk;
+
 	if (nr >= db->next_nr)
 		return ERR_PTR(EINVAL);
 
-#ifdef MAP_POPULATE /* Linux flag */
-	return __map_chunk(db, nr, MAP_POPULATE|MAP_NOCACHE);
-#else
-	void *chunk = __map_chunk(db, nr, MAP_NOCACHE);
+	chunk = __map_chunk(db, nr, MAP_NOCACHE|MAP_POPULATE);
+#if MAP_POPULATE == 0
 	if (!IS_ERR(chunk))
 		posix_madvise(chunk, CHUNK_SIZE, POSIX_MADV_WILLNEED);
-	return chunk;
 #endif
+	return chunk;
 }
 
 static inline void unmap_chunk(void *chunk)
@@ -344,12 +340,10 @@ static int file_chunkdb_ctor(const char *spec, struct chunk_db *chunk_db)
 	if (error)
 		goto error;
 
-#if HAVE_POSIX_FADVISE
 	/*
 	 * Tell the OS that it doesn't eed to do read-ahead on this file.
 	 */
 	posix_fadvise(db->fd, 0, 0, POSIX_FADV_RANDOM);
-#endif
 
 	return 0;
 set_error:

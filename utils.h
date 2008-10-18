@@ -5,10 +5,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-extern size_t strnlen(const char *s, size_t maxlen);
-extern int fls(int i);
-extern void sranddev(void);
-
 /*
  * Logging
  */
@@ -38,9 +34,17 @@ extern char zunkfs_log_level;
 #define TRACE(x...)   zprintf(ZUNKFS_TRACE, __FUNCTION__, __LINE__, x)
 
 #define panic(x...) do { \
-	if (!zprintf('E', __FUNCTION__, __LINE__, x)) \
+	if (!zprintf(ZUNKFS_ERROR, __FUNCTION__, __LINE__, x)) \
 		fprintf(stderr, x); \
 	abort(); \
+} while(0)
+
+#define warn_once(x...) do { \
+	static int once = 1; \
+	if (once) { \
+		WARNING(x); \
+		once = 0; \
+	} \
 } while(0)
 
 #define COMPILER_ASSERT(cond, cond_name) \
@@ -114,6 +118,32 @@ struct sockaddr_in *__string_sockaddr_in(const char *str,
 
 #define string_sockaddr_in(addr_str) \
 	__string_sockaddr_in(addr_str, alloca(sizeof(struct sockaddr_in)))
+
+/*
+ * Portability stuff...
+ */
+#ifndef MAP_NOCACHE /* OSX mmap flag */
+#define MAP_NOCACHE 0
+#endif
+
+#ifndef MAP_POPULATE /* Linux mmap flag */
+#define MAP_POPULATE 0
+#endif
+
+extern size_t strnlen(const char *s, size_t maxlen);
+extern int fls(int i);
+extern void sranddev(void);
+extern int posix_madvise(void *, size_t, int);
+extern int posix_fadvise(int, off_t, off_t, int);
+
+#ifndef POSIX_MADV_WILLNEED
+#define POSIX_MADV_WILLNEED 0
+#endif
+
+#ifndef POSIX_FADV_RANDOM
+#define POSIX_FADV_RANDOM 0
+#endif
+
 
 #endif
 

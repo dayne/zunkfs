@@ -151,6 +151,17 @@ void __attribute__((weak)) sranddev(void)
 	srand(tv.tv_usec);
 }
 
+int __attribute__((weak)) posix_madvise(void *ptr, size_t len, int advice)
+{
+	return 0;
+}
+
+int __attribute__((weak)) posix_fadvise(int fd, off_t offset, off_t len,
+		int advice)
+{
+	return 0;
+}
+
 struct sockaddr_in *__string_sockaddr_in(const char *str,
 		struct sockaddr_in *sa)
 {

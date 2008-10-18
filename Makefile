@@ -21,6 +21,7 @@ endif
 
 ifeq ("$(OS)","Linux")
 FUSE_CFLAGS+=-D_FILE_OFFSET_BITS=64
+CFLAGS+=-DHAVE_POSIX_FADVISE
 endif
 
 CORE_OBJS=chunk-tree.o \
@@ -37,7 +38,8 @@ DBTYPES=chunk-db-local.o \
 	chunk-db-map.o \
 	chunk-db-sqlite.o \
 	chunk-db-mem.o \
-	chunk-db-zdb.o
+	chunk-db-zdb.o \
+	chunk-db-file.o
 
 UNIT_TEST_OBJS=$(CORE_OBJS) \
 	       unit-test-utils.o \

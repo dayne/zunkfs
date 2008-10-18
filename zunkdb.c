@@ -720,6 +720,7 @@ static const struct option long_opts[] = {
 	{ "promote-nodes", no_argument, NULL, OPT_PROMOTE },
 	{ "forward-timeout", required_argument, NULL, OPT_FORWARD_TIMEOUT },
 	{ "max-forwards", required_argument, NULL, OPT_MAX_FORWARD },
+	{ "log", required_argument, NULL, OPT_LOG },
 	{ NULL }
 };
 

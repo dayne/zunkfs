@@ -36,6 +36,16 @@ struct open_file {
 #define unlock_file(of)  unlock(&(of)->dentry->mutex)
 #define assert_file_locked(of) assert(have_mutex(&(of)->dentry->mutex))
 
+/*
+ * Only regular files may cache their chunks. For other files,
+ * it's possible that cnode->_private will already point
+ * to something else.
+ */
+static inline int cachable(const struct open_file *ofile)
+{
+	return S_ISREG(ofile->dentry->ddent->mode);
+}
+
 static inline void set_cached(struct chunk_node *cnode)
 {
 	assert(cnode->_private == NULL);
@@ -151,7 +161,8 @@ int flush_file(struct open_file *ofile)
 	return retv;
 }
 
-static void __cache_file_chunk(struct open_file *ofile, struct chunk_node *cnode)
+static void __cache_file_chunk(struct open_file *ofile,
+		struct chunk_node *cnode)
 {
 	unsigned index;
 
@@ -167,9 +178,10 @@ static void __cache_file_chunk(struct open_file *ofile, struct chunk_node *cnode
 	ofile->ccache[index] = cnode;
 }
 
-static inline void cache_file_chunk(struct open_file *ofile, struct chunk_node *cnode)
+static inline void cache_file_chunk(struct open_file *ofile,
+		struct chunk_node *cnode)
 {
-	if (!is_cached(cnode))
+	if (cachable(ofile) && !is_cached(cnode))
 		__cache_file_chunk(ofile, cnode);
 	else
 		put_chunk_node(cnode);
@@ -178,7 +190,6 @@ static inline void cache_file_chunk(struct open_file *ofile, struct chunk_node *
 static int rw_file(struct open_file *ofile, char *buf, size_t bufsz,
 		off_t offset, int read)
 {
-	unsigned cache = !S_ISDIR(ofile->dentry->ddent->mode);
 	struct chunk_node *cnode;
 	unsigned chunk_nr;
 	unsigned chunk_off;
@@ -220,10 +231,7 @@ static int rw_file(struct open_file *ofile, char *buf, size_t bufsz,
 		}
 		len += cplen;
 
-		if (cache)
-			cache_file_chunk(ofile, cnode);
-		else
-			put_chunk_node(cnode);
+		cache_file_chunk(ofile, cnode);
 
 		chunk_nr ++;
 		chunk_off = 0;

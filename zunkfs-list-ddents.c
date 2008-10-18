@@ -72,24 +72,12 @@ static void proc_opt(int opt, char *arg)
 		break;
 
 	case OPT_LOG:
-		if (zunkfs_log_fd) {
-			fprintf(stderr, "Log file specified more than once.\n");
-			exit(-1);
+		err = set_logging(arg);
+		if (err) {
+			fprintf(stderr, "Failed to enable logging: %s\n",
+					strerror(-err));
+			exit(-2);
 		}
-		if (arg[1] == ',') {
-			if (!strchr("EWT", arg[0])) {
-				fprintf(stderr, "Invalid log level.\n");
-				exit(-1);
-			}
-			zunkfs_log_level = arg[0];
-			arg += 2;
-		}
-		if (!strcmp(arg, "stderr"))
-			zunkfs_log_fd = stderr;
-		else if (!strcmp(arg, "stdout"))
-			zunkfs_log_fd = stdout;
-		else
-			zunkfs_log_fd = fopen(arg, "w");
 		break;
 	case OPT_FULL:
 		full_output = 1;

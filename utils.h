@@ -9,14 +9,15 @@
  * Logging
  */
 int set_logging(const char *params);
+int dup_log_fd(int to);
 void __zprintf(char level, const char *funct, int line, const char *fmt, ...);
 
-extern FILE *zunkfs_log_fd;
+extern FILE *zunkfs_log_fp;
 extern char zunkfs_log_level;
 
 #define zprintf(level, function, line, fmt...) ({ \
 	int ___ret = 0; \
-	if (zunkfs_log_fd && (level) <= zunkfs_log_level) { \
+	if (zunkfs_log_fp && (level) <= zunkfs_log_level) { \
 		int ___saved_errno = errno; \
 		__zprintf(level, function, line, fmt); \
 		errno = ___saved_errno; \

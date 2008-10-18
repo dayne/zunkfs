@@ -15,17 +15,18 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <sys/time.h>
+#include <sys/file.h>
 #include <fcntl.h>
 
 #include "utils.h"
 #include "mutex.h"
 
-FILE *zunkfs_log_fd = NULL;
+FILE *zunkfs_log_fp = NULL;
 char zunkfs_log_level = 0;
 
 int set_logging(const char *params)
 {
-	if (zunkfs_log_fd)
+	if (zunkfs_log_fp)
 		return -EALREADY;
 
 	if (params[1] == ',') {
@@ -45,18 +46,24 @@ int set_logging(const char *params)
 		params += 2;
 	}
 	if (!strcmp(params, "stderr"))
-		zunkfs_log_fd = stderr;
+		zunkfs_log_fp = stderr;
 	else if (!strcmp(params, "stdout"))
-		zunkfs_log_fd = stdout;
+		zunkfs_log_fp = stdout;
 	else
-		zunkfs_log_fd = fopen(params, "w");
+		zunkfs_log_fp = fopen(params, "w");
 
-	return zunkfs_log_fd ? 0 : -errno;
+	return zunkfs_log_fp ? 0 : -errno;
+}
+
+int dup_log_fd(int to)
+{
+	if (zunkfs_log_fp && dup2(fileno(zunkfs_log_fp), to))
+		return -errno;
+	return 0;
 }
 
 void __zprintf(char level, const char *function, int line, const char *fmt, ...)
 {
-	static DECLARE_MUTEX(log_mutex);
 	const char *level_str = NULL;
 	va_list ap;
 
@@ -69,20 +76,20 @@ void __zprintf(char level, const char *function, int line, const char *fmt, ...)
 	else
 		abort();
 
-	lock(&log_mutex);
-	if (zunkfs_log_fd == stderr)
+	flock(fileno(zunkfs_log_fp), LOCK_EX);
+	if (zunkfs_log_fp == stderr)
 		fflush(stdout);
-	fprintf(zunkfs_log_fd, "%lx %s %s:%d: ",
+	fprintf(zunkfs_log_fp, "%lx %s %s:%d: ",
 			((unsigned long)pthread_self()) >> 8,
 			level_str, function, line);
 
 	va_start(ap, fmt);
-	vfprintf(zunkfs_log_fd, fmt, ap);
+	vfprintf(zunkfs_log_fp, fmt, ap);
 	va_end(ap);
 
-	fflush(zunkfs_log_fd);
+	fflush(zunkfs_log_fp);
 
-	unlock(&log_mutex);
+	flock(fileno(zunkfs_log_fp), LOCK_UN);
 }
 
 void *const __errptr;

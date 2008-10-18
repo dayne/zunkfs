@@ -167,7 +167,7 @@ int main(int argc, char **argv)
 	DECLARE_MUTEX(root_mutex);
 	int i, err;
 
-	zunkfs_log_fd = stdout;
+	zunkfs_log_fp = stdout;
 	zunkfs_log_level = 'T';
 
 	err = add_chunkdb("rw,mem:");

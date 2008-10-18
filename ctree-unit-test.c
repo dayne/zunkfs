@@ -66,8 +66,9 @@ int main(int argc, char **argv)
 	unsigned char root_digest[CHUNK_DIGEST_LEN];
 	int i, err;
 
-	zunkfs_log_fd = stdout;
-	zunkfs_log_level = 'T';
+	err = set_logging("T,stdout");
+	if (err)
+		panic("set_logging: %s\n", strerror(-err));
 
 	err = add_chunkdb("rw,mem:");
 	if (err)

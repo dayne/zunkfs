@@ -91,13 +91,10 @@ static int xfer_chunk(unsigned char *chunk, const unsigned char *digest,
 		exit(-errno);
 	}
 
-	if (zunkfs_log_fd) {
-		err = dup2(fileno(zunkfs_log_fd), STDERR_FILENO);
-		if (err < 0) {
-			ERROR("stderr redirection failed: %s\n",
-					strerror(errno));
-			exit(-errno);
-		}
+	err = dup_log_fd(STDERR_FILENO);
+	if (err) {
+		ERROR("stderr redirection failed: %s\n", strerror(-err));
+		exit(err);
 	}
 
 	execl(fetch_cmd, fetch_cmd, chunk_name, NULL);

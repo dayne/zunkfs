@@ -574,7 +574,7 @@ static void proc_msg(const char *buf, size_t len, struct node *node)
 		
 	} else if (!strncmp(msg, STORE_CHUNK, STORE_CHUNK_LEN)) {
 		msg += STORE_CHUNK_LEN + 1;
-		len -= STORE_CHUNK_LEN - 1;
+		len -= STORE_CHUNK_LEN + 1;
 		
 		if (store_value(msg, digest) != CHUNK_SIZE) {
 			free_node(node);
@@ -588,7 +588,7 @@ static void proc_msg(const char *buf, size_t len, struct node *node)
 		struct sockaddr_in *addr;
 
 		msg += STORE_NODE_LEN + 1;
-		len -= STORE_NODE_LEN - 1;
+		len -= STORE_NODE_LEN + 1;
 
 		addr = string_sockaddr_in(msg);
 		if (!addr)
@@ -601,7 +601,7 @@ static void proc_msg(const char *buf, size_t len, struct node *node)
 
 	} else if (!strncmp(msg, FORWARD_CHUNK, FORWARD_CHUNK_LEN)) {
 		msg += FORWARD_CHUNK_LEN + 1;
-		len -= FORWARD_CHUNK_LEN - 1;
+		len -= FORWARD_CHUNK_LEN + 1;
 
 		if (store_value(msg, digest) != CHUNK_SIZE) {
 			free_node(node);
@@ -613,7 +613,7 @@ static void proc_msg(const char *buf, size_t len, struct node *node)
 
 	} else if (!strncmp(msg, REQUEST_DONE, REQUEST_DONE_LEN)) {
 		msg += REQUEST_DONE_LEN + 1;
-		len -= REQUEST_DONE_LEN - 1;
+		len -= REQUEST_DONE_LEN + 1;
 
 		__string_digest(msg, digest);
 		finish_request(digest);

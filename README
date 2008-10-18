@@ -145,6 +145,14 @@ ChunkDB backends
 	Usage example:
 		./zunkfs --chunk-db=rw,zunkdb:127.0.0.1:9876 ./myfs /mount/point
 
+* file:/path/to/database/file
+	Uses a specially formatted file for chunk storage. If the file
+	does not exist, it'll be created. The first 512MB of the file are
+	reserved for the chunk index. After that, it's all just chunks.
+
+	Usage example:
+		./zunkfs --chunk-db=rw,file:/path/to/foo/chunk.db
+
 
 V. ZunkDB usage
 ===============

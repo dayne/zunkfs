@@ -55,18 +55,8 @@ static inline unsigned char *__map_chunk(struct db *db, uint32_t nr,
 {
 	void *chunk;
 
-	/*
-	 * If adding a new chunk, the file needs to be resized, otherwise
-	 * any access to the chunk will cause a SIGBUS. (At least on OSX,
-	 * but keep for other OSes just-in-case.)
-	 */
-	if (nr == db->next_nr && ftruncate(db->fd,
-				(off_t)(nr + 1) * CHUNK_SIZE))
-		return ERR_PTR(errno);
-
 	chunk = mmap(NULL, CHUNK_SIZE, PROT_READ | (db->ro ? 0 : PROT_WRITE),
-			MAP_SHARED|extra_flags, db->fd,
-			(off_t)nr * CHUNK_SIZE);
+			MAP_SHARED|extra_flags, db->fd, (off_t)nr * CHUNK_SIZE);
 	if (chunk == MAP_FAILED)
 		return ERR_PTR(errno);
 
@@ -84,6 +74,9 @@ static inline unsigned char *__map_chunk(struct db *db, uint32_t nr,
  */
 static inline void *map_chunk(struct db *db, uint32_t nr)
 {
+	if (nr >= db->next_nr)
+		return ERR_PTR(EINVAL);
+
 #ifdef MAP_POPULATE /* Linux flag */
 	return __map_chunk(db, nr, MAP_POPULATE|MAP_NOCACHE);
 #else
@@ -290,6 +283,15 @@ static int file_write_chunk(const unsigned char *chunk,
 	if (db_chunk) {
 		if (IS_ERR(db_chunk))
 			goto db_chunk_error;
+		goto out;
+	}
+
+	/*
+	 * When adding a new chunk, the file needs to be resized, otherwise
+	 * any access to the chunk will cause a SIGBUS. 
+	 */
+	if (ftruncate(db->fd, ((off_t)db->next_nr + 1) * CHUNK_SIZE)) {
+		error = -errno;
 		goto out;
 	}
 

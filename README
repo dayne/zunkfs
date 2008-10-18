@@ -174,3 +174,18 @@ other ports:
 	zunkdb --addr [ip]:port --chunk-db rw,mem:100 --peer other.host:port
 
 
+VI. Hints and other Usage Notes
+===============================
+
+Use mem: chunk-db as a cache
+----------------------------
+Since zunkfs will cache chunks found on db N on dbs 1...N-1, it's helpful
+to always use a memory based db as a cache:
+
+	zunkfs --chunk-db=rw,wt,mem:100 --chunk-db=rw,zunkdb:some.host.com:9876\
+			  ./myfs /my/mount/point
+
+This way, any chunk found in a possibly remote zunkdb node will be cached in
+memory by zunkfs. Any writes to zunkfs will end up in both the in-memory cache,
+and on some zunkdb nodes.
+

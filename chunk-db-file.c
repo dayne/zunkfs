@@ -55,6 +55,15 @@ static inline unsigned char *__map_chunk(struct db *db, uint32_t nr,
 {
 	void *chunk;
 
+	/*
+	 * If adding a new chunk, the file needs to be resized, otherwise
+	 * any access to the chunk will cause a SIGBUS. (At least on OSX,
+	 * but keep for other OSes just-in-case.)
+	 */
+	if (nr == db->next_nr && ftruncate(db->fd,
+				(off_t)(nr + 1) * CHUNK_SIZE))
+		return ERR_PTR(errno);
+
 	chunk = mmap(NULL, CHUNK_SIZE, PROT_READ | (db->ro ? 0 : PROT_WRITE),
 			MAP_SHARED|extra_flags, db->fd,
 			(off_t)nr * CHUNK_SIZE);

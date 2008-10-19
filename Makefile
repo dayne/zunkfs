@@ -56,7 +56,11 @@ FINAL_OBJS=zunkfs \
 
 all: ${FINAL_OBJS}
 
-tests: ctree-unit-test dir-unit-test file-unit-test base64-test test-client
+tests: ctree-unit-test dir-unit-test file-unit-test base64-test
+
+cscope:
+	find . -name '*.[ch]' > cscope.files
+	cscope -b -i cscope.files
 
 zunkfs: $(CORE_OBJS) $(DBTYPES) fuse.o
 	$(CC) -o $@ $^ $(LDFLAGS)
@@ -82,12 +86,9 @@ zunkdb: $(CORE_OBJS) $(DBTYPES) zunkdb.o
 chunk-db-unit-test: $(CORE_OBJS) $(DBTYPES) chunk-db-unit-test.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-test-client: client.o base64.o
-	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
-
 base64-test: base64-test.o base64.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 clean:
-	@rm -f $(FINAL_OBJS) *.o *.out *.log core
+	@rm -f $(FINAL_OBJS) *.o *.out *.log core cscope.*
 

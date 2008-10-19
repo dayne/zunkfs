@@ -1,5 +1,6 @@
 
 #define _GNU_SOURCE
+
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -62,6 +63,8 @@ struct node {
 #define STORE_NODE_LEN		(sizeof(STORE_NODE) - 1)
 #define FORWARD_CHUNK		"forward_chunk"
 #define FORWARD_CHUNK_LEN	(sizeof(FORWARD_CHUNK) - 1)
+#define PUSH_CHUNK		"push_chunk"
+#define PUSH_CHUNK_LEN		(sizeof(PUSH_CHUNK) - 1)
 
 #define NODE_VEC_MAX	5
 
@@ -77,6 +80,7 @@ static unsigned may_promote = 0;
 static struct timeval forward_timeout = {60, 0};
 static unsigned max_forwards = 1000;
 static unsigned pending_forwards = 0;
+static unsigned slow_uplink = 0;
 
 static inline unsigned char *__data_digest(const void *buf, size_t len,
 		unsigned char *digest)
@@ -458,7 +462,8 @@ static void request_timeoutcb(int fd, short event, void *arg)
 	free(req);
 }
 
-static void forward_chunk(const char *value, const unsigned char *digest)
+static void forward_chunk(const char *value, const unsigned char *digest,
+		unsigned max_d)
 {
 	struct forward_request *req;
 	struct node *node_vec[NODE_VEC_MAX];
@@ -489,6 +494,8 @@ static void forward_chunk(const char *value, const unsigned char *digest)
 	req->min_dist = INT_MAX;
 
 	for (i = 0; i < n; i ++) {
+		if (dist_vec[i] >= max_d)
+			continue;
 		if (bufferevent_write(node_vec[i]->bev,
 					EVBUFFER_DATA(req->evbuf),
 					EVBUFFER_LENGTH(req->evbuf)))
@@ -519,6 +526,48 @@ discard:
 	if (req->evbuf)
 		evbuffer_free(req->evbuf);
 	free(req);
+}
+
+static void push_chunk(const char *value, const unsigned char *digest,
+		unsigned max_d)
+{
+	struct evbuffer *evbuf;
+	struct node *node_vec[NODE_VEC_MAX];
+	int dist_vec[NODE_VEC_MAX];
+	int i, n, best = -1;
+
+	evbuf = evbuffer_new();
+	if (!evbuf)
+		return;
+
+	n = __nearest_nodes(digest, node_vec, dist_vec, NODE_VEC_MAX);
+	if (!n)
+		goto out;
+
+	for (i = 0; i < n; i ++) {
+		if (dist_vec[i] >= max_d)
+			continue;
+		if (evbuffer_add_printf(evbuf, "%s %s:%u\r\n",
+					STORE_NODE,
+					node_addr_string(node_vec[i]),
+					node_port(node_vec[i])) < 0)
+			goto out;
+		if (best == -1 || dist_vec[best] < dist_vec[i])
+			best = i;
+	}
+
+	if (best == -1)
+		goto out;
+	if (evbuffer_add_printf(evbuf, "%s %d %s\r\n",
+				PUSH_CHUNK, dist_vec[best], value) < 0)
+		goto out;
+
+	bufferevent_write_buffer(node_vec[best]->bev, evbuf);
+out:
+	evbuffer_free(evbuf);
+
+	TRACE("digest=%s max_d=%u n=%d best=%d\n", 
+			digest_string(digest), max_d, n, best);
 }
 
 static inline void request_done(const char *key_str, struct evbuffer *output)
@@ -608,7 +657,32 @@ static void proc_msg(const char *buf, size_t len, struct node *node)
 			return;
 		}
 
-		forward_chunk(msg, digest);
+		if (!slow_uplink)
+			forward_chunk(msg, digest, -1);
+		else
+			push_chunk(msg, digest, -1);
+
+		request_done(digest_string(digest), output);
+
+	} else if (!strncmp(msg, PUSH_CHUNK, PUSH_CHUNK_LEN)) {
+		unsigned max_d;
+		char *end;
+
+		msg += PUSH_CHUNK_LEN + 1;
+		len -= PUSH_CHUNK_LEN + 1;
+
+		max_d = strtol(msg, &end, 10);
+
+		if (store_value(end + 1, digest) != CHUNK_SIZE) {
+			free_node(node);
+			return;
+		}
+
+		if (!slow_uplink)
+			forward_chunk(end + 1, digest, max_d);
+		else
+			push_chunk(end + 1, digest, max_d);
+
 		request_done(digest_string(digest), output);
 
 	} else if (!strncmp(msg, REQUEST_DONE, REQUEST_DONE_LEN)) {
@@ -696,6 +770,7 @@ enum {
 	OPT_PROMOTE = 'o',
 	OPT_FORWARD_TIMEOUT = 't',
 	OPT_MAX_FORWARD = 'x',
+	OPT_SLOW_UPLINK = 's',
 };
 
 static const char short_opts[] = {
@@ -708,6 +783,7 @@ static const char short_opts[] = {
 	OPT_PROMOTE,
 	OPT_FORWARD_TIMEOUT, OPT_REQUIRED_ARG,
 	OPT_MAX_FORWARD, OPT_REQUIRED_ARG,
+	OPT_SLOW_UPLINK,
 	0
 };
 
@@ -721,6 +797,7 @@ static const struct option long_opts[] = {
 	{ "forward-timeout", required_argument, NULL, OPT_FORWARD_TIMEOUT },
 	{ "max-forwards", required_argument, NULL, OPT_MAX_FORWARD },
 	{ "log", required_argument, NULL, OPT_LOG },
+	{ "slow-uplink", no_argument, NULL, OPT_SLOW_UPLINK },
 	{ NULL }
 };
 
@@ -738,6 +815,8 @@ static const struct option long_opts[] = {
 "                                  Default = 60.\n"\
 "-x|--max-forwards <count>         Maximum number of pending forwards.\n"\
 "                                  Use to limit memory usage. Default = 1000\n"\
+"-s|--slow-uplink                  Uplink is slow, use push method to store chunks\n"\
+"                                  on other nodes.\n"\
 "\nChunk-db specs:\n"
 
 static void usage(int exit_code)
@@ -807,6 +886,10 @@ static int proc_opt(int opt, char *arg)
 
 	case OPT_MAX_FORWARD:
 		max_forwards = atoi(optarg);
+		return 0;
+
+	case OPT_SLOW_UPLINK:
+		slow_uplink = 1;
 		return 0;
 
 	default:

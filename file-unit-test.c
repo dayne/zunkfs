@@ -181,10 +181,10 @@ int main(int argc, char **argv)
 
 	namcpy(root_ddent.name, "/");
 
-	root_ddent.mode = S_IFDIR | S_IRWXU;
-	root_ddent.size = 0;
-	root_ddent.ctime = time(NULL);
-	root_ddent.mtime = time(NULL);
+	root_ddent.mode = htole16(S_IFDIR | S_IRWXU);
+	root_ddent.size = htole64(0);
+	root_ddent.ctime = htole32(time(NULL));
+	root_ddent.mtime = htole32(time(NULL));
 
 	err = set_root(&root_ddent, &root_mutex);
 	if (err)

@@ -143,16 +143,16 @@ int main(int argc, char **argv)
 			printf("%s %s 0%0o %"PRIu64" %u %u %s\n", 
 					digest_string(dentry.digest),
 					digest_string(dentry.secret_digest),
-					dentry.mode,
-					dentry.size,
-					dentry.ctime,
-					dentry.mtime,
+					le16toh(dentry.mode),
+					le64toh(dentry.size),
+					le32toh(dentry.ctime),
+					le32toh(dentry.mtime),
 					dentry.name);
 		} else {
 			printf("%s %s %"PRIu64" %s\n",
 					digest_string(dentry.digest),
 					digest_string(dentry.secret_digest),
-					dentry.size,
+					le64toh(dentry.size),
 					dentry.name);
 		}
 	}

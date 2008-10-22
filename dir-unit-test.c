@@ -10,9 +10,9 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/types.h>
 
 #include "zunkfs.h"
@@ -31,6 +31,7 @@ static void test4(void);
 int main(int argc, char **argv)
 {
 	struct disk_dentry root_ddent;
+	struct timeval now;
 	DECLARE_MUTEX(root_mutex);
 	int err;
 
@@ -51,10 +52,12 @@ int main(int argc, char **argv)
 
 	namcpy(root_ddent.name, "/");
 
-	root_ddent.mode = S_IFDIR | S_IRWXU;
-	root_ddent.size = 0;
-	root_ddent.ctime = time(NULL);
-	root_ddent.mtime = time(NULL);
+	gettimeofday(&now, NULL);
+
+	root_ddent.mode = htole16(S_IFDIR | S_IRWXU);
+	root_ddent.size = htole64(0);
+	root_ddent.ctime = htole32(now.tv_sec);
+	root_ddent.mtime = htole32(now.tv_sec);
 
 	err = set_root(&root_ddent, &root_mutex);
 	if (err)
@@ -349,12 +352,11 @@ static void test4(void)
 	if (IS_ERR(foo))
 		panic("find_dentry(/foo): %s\n", strerror(PTR_ERR(foo)));
 
-	printf("foo mode: 0%o (expected 0%o)\n", foo->ddent->mode,
-			S_IFREG | S_IRWXU);
+	printf("foo mode: 0%o (expected 0%o)\n", foo->mode, S_IFREG | S_IRWXU);
 
 	dentry_chmod(foo, S_IRUSR | S_IXUSR);
 
-	printf("foo mode: 0%o (expected 0%o)\n", foo->ddent->mode,
+	printf("foo mode: 0%o (expected 0%o)\n", foo->mode,
 			S_IFREG | S_IRUSR | S_IXUSR);
 
 	put_dentry(foo);
@@ -363,12 +365,11 @@ static void test4(void)
 	if (IS_ERR(bar))
 		panic("find_dentry(/bar): %s\n", strerror(PTR_ERR(bar)));
 
-	printf("bar mode: 0%o (expected 0%o)\n", bar->ddent->mode,
-			S_IFDIR | S_IRWXU);
+	printf("bar mode: 0%o (expected 0%o)\n", bar->mode, S_IFDIR | S_IRWXU);
 
 	dentry_chmod(bar, S_IRUSR | S_IXUSR);
 
-	printf("bar mode: 0%o (expected 0%o)\n", bar->ddent->mode,
+	printf("bar mode: 0%o (expected 0%o)\n", bar->mode,
 			S_IFDIR | S_IRUSR | S_IXUSR);
 
 	put_dentry(bar);

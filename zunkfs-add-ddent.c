@@ -137,9 +137,9 @@ int main(int argc, char **argv)
 	 * XXX: What happens if the new ddent points to a parent dir's ddent?
 	 */
 	if (!strcmp(argv[i], "file"))
-		new_ddent.mode = S_IFREG | S_IRUSR | S_IWUSR;
+		new_ddent.mode = htole16(S_IFREG | S_IRUSR | S_IWUSR);
 	else if (!strcmp(argv[i], "dir"))
-		new_ddent.mode = S_IFDIR | S_IRWXU;
+		new_ddent.mode = htole16(S_IFDIR | S_IRWXU);
 	else {
 		fprintf(stderr, "Please specify file or directory\n\n");
 		usage(-1);
@@ -154,9 +154,10 @@ int main(int argc, char **argv)
 		usage(-1);
 	}
 
-	new_ddent.size = atoll(argv[++i]);
-	if (!new_ddent.size) {
-		fprintf(stderr, "Invalid size: %"PRIu64"\n\n", new_ddent.size);
+	new_ddent.size = htole64(atoll(argv[++i]));
+	if (!le64toh(new_ddent.size)) {
+		fprintf(stderr, "Invalid size: %"PRIu64"\n\n", 
+				le64toh(new_ddent.size));
 		usage(-1);
 	}
 

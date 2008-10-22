@@ -12,6 +12,7 @@
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <unistd.h>
 #include <limits.h>
 #include <dirent.h>
@@ -51,7 +52,7 @@ static int zunkfs_getattr(const char *path, struct stat *stbuf)
 	 */
 	memcpy(&stbuf->st_ino, dentry->ddent->secret_digest, sizeof(ino_t));
 
-	stbuf->st_mode = dentry->ddent->mode;
+	stbuf->st_mode = dentry->mode;
 
 	/* hardlinks aren't supported */
 	stbuf->st_nlink = 1;
@@ -64,7 +65,7 @@ static int zunkfs_getattr(const char *path, struct stat *stbuf)
 
 	stbuf->st_atime = dentry->mtime.tv_sec;
 	stbuf->st_mtime = dentry->mtime.tv_sec;
-	stbuf->st_ctime = dentry->ddent->ctime;
+	stbuf->st_ctime = le32toh(dentry->ddent->ctime);
 
 	stbuf->st_blksize = 4096;
 	stbuf->st_blocks = (dentry->size + 4095) / 4096;
@@ -115,7 +116,7 @@ static int zunkfs_readdir(const char *path, void *filldir_buf,
 		return -PTR_ERR(dentry);
 
 	err = -ENOTDIR;
-	if (!S_ISDIR(dentry->ddent->mode))
+	if (!S_ISDIR(dentry->mode))
 		goto out;
 
 	err = -ENOBUFS;
@@ -263,7 +264,7 @@ static int zunkfs_rmdir(const char *path)
 		return -PTR_ERR(dentry);
 
 	err = -ENOTDIR;
-	if (!S_ISDIR(dentry->ddent->mode))
+	if (!S_ISDIR(dentry->mode))
 		goto out;
 
 	err = -EBUSY;
@@ -286,12 +287,12 @@ static int zunkfs_utimens(const char *path, const struct timespec tv[2])
 	if (IS_ERR(dentry))
 		return -PTR_ERR(dentry);
 
-	lock(dentry->ddent_mutex);
-	if (dentry->ddent->mtime != tv[1].tv_sec) {
-		dentry->ddent->mtime = tv[1].tv_sec;
-		dentry->ddent_cnode->dirty = 1;
-	}
-	unlock(dentry->ddent_mutex);
+	lock(&dentry->mutex);
+	dentry->mtime.tv_sec = tv[1].tv_sec;
+	dentry->mtime.tv_usec = tv[1].tv_nsec / 1000;
+	dentry->dirty = 1;
+	unlock(&dentry->mutex);
+
 	put_dentry(dentry);
 
 	return 0;
@@ -362,6 +363,7 @@ static void set_root_file(const char *fs_descr)
 {
 	static DECLARE_MUTEX(root_mutex);
 	struct disk_dentry *root_ddent;
+	struct timeval now;
 	int err, fd;
 
 	fd = open(fs_descr, O_RDWR|O_CREAT, 0600);
@@ -380,10 +382,13 @@ static void set_root_file(const char *fs_descr)
 	if (root_ddent->name[0] == '\0') {
 		namcpy(root_ddent->name, "/");
 
-		root_ddent->mode = S_IFDIR | S_IRWXU;
-		root_ddent->size = 0;
-		root_ddent->ctime = time(NULL);
-		root_ddent->mtime = time(NULL);
+		gettimeofday(&now, NULL);
+
+		root_ddent->mode = htole16(S_IFDIR | S_IRWXU);
+		root_ddent->size = htole64(0);
+		root_ddent->ctime = htole32(now.tv_sec);
+		root_ddent->mtime = htole32(now.tv_sec);
+		root_ddent->mtime_csec = now.tv_usec / 10000;
 
 		err = random_chunk_digest(root_ddent->secret_digest);
 		if (err < 0) {

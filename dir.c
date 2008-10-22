@@ -100,8 +100,9 @@ static struct dentry *new_dentry(struct dentry *parent,
 	dentry->ddent_cnode = ddent_cnode;
 	dentry->ddent_mutex = ddent_mutex;
 	dentry->parent = parent;
-	dentry->size = ddent->size;
-	dentry->mtime.tv_sec = ddent->mtime;
+	dentry->size = le64toh(ddent->size);
+	dentry->mode = le16toh(ddent->mode);
+	dentry->mtime.tv_sec = le32toh(ddent->mtime);
 	dentry->mtime.tv_usec = ddent->mtime_csec * 10000;
 
 	init_mutex(&dentry->mutex);
@@ -133,12 +134,12 @@ int init_disk_dentry(struct disk_dentry *ddent)
 	return err;
 }
 
-static inline unsigned ddent_chunk_count(struct disk_dentry *ddent)
+static inline unsigned dentry_chunk_count(struct dentry *dentry)
 {
-	if (S_ISREG(ddent->mode))
-		return (ddent->size + CHUNK_SIZE - 1) / CHUNK_SIZE;
-	assert(S_ISDIR(ddent->mode));
-	return (ddent->size + DIRENTS_PER_CHUNK - 1) / DIRENTS_PER_CHUNK;
+	if (S_ISREG(dentry->mode))
+		return (dentry->size + CHUNK_SIZE - 1) / CHUNK_SIZE;
+	assert(S_ISDIR(dentry->mode));
+	return (dentry->size + DIRENTS_PER_CHUNK - 1) / DIRENTS_PER_CHUNK;
 }
 
 struct chunk_node *get_dentry_chunk(struct dentry *dentry, unsigned chunk_nr)
@@ -159,7 +160,7 @@ struct chunk_node *get_dentry_chunk(struct dentry *dentry, unsigned chunk_nr)
 		if (err < 0)
 			return ERR_PTR(-err);
 		err = init_chunk_tree(&dentry->chunk_tree,
-				ddent_chunk_count(dentry->ddent),
+				dentry_chunk_count(dentry),
 				dentry->ddent->digest, &dentry_ctree_ops);
 		if (err < 0)
 			return ERR_PTR(-err);
@@ -241,8 +242,9 @@ static void flush_dentry(struct dentry *dentry)
 	}
 	
 	if (dentry->dirty) {
-		dentry->ddent->size = dentry->size;
-		dentry->ddent->mtime = dentry->mtime.tv_sec;
+		dentry->ddent->size = htole64(dentry->size);
+		dentry->ddent->mode = htole16(dentry->mode);
+		dentry->ddent->mtime = htole32(dentry->mtime.tv_sec);
 		dentry->ddent->mtime_csec = dentry->mtime.tv_usec / 10000;
 		if (dentry->ddent_cnode)
 			dentry->ddent_cnode->dirty = 1;
@@ -316,7 +318,7 @@ static struct dentry *lookup(struct dentry *parent, const char *name, int len)
 	struct dentry *dentry;
 	unsigned nr;
 
-	assert(S_ISDIR(parent->ddent->mode));
+	assert(S_ISDIR(parent->mode));
 	assert(have_mutex(&parent->mutex));
 
 	if (len >= DDENT_NAME_MAX)
@@ -383,15 +385,16 @@ struct dentry *add_dentry(struct dentry *parent, const char *name, mode_t mode)
 
 	namcpy(dentry->ddent->name, name);
 
-	dentry->ddent->mode = mode;
-	dentry->ddent->size = 0;
-	dentry->ddent->ctime = now.tv_sec;
-	dentry->ddent->mtime = now.tv_sec;
+	dentry->ddent->mode = htole16(mode);
+	dentry->ddent->size = htole64(0);
+	dentry->ddent->ctime = htole32(now.tv_sec);
+	dentry->ddent->mtime = htole32(now.tv_sec);
 	dentry->ddent->mtime_csec = now.tv_usec * 10000;
 
 	dentry->dirty = 1;
 	dentry->size = 0;
 	dentry->mtime = now;
+	dentry->mode = mode;
 
 	parent->dirty = 1;
 	parent->size ++;
@@ -555,7 +558,7 @@ int set_root(struct disk_dentry *ddent, struct mutex *ddent_mutex)
 {
 	int err;
 
-	if (!S_ISDIR(ddent->mode))
+	if (!S_ISDIR(le16toh(ddent->mode)))
 		return -ENOTDIR;
 
 	assert(root_dentry == NULL || IS_ERR(root_dentry));
@@ -748,9 +751,10 @@ int rename_dentry(struct dentry *dentry, const char *new_name,
 
 void dentry_chmod(struct dentry *dentry, mode_t mode)
 {
-	lock(dentry->ddent_mutex);
-	dentry->ddent->mode = (dentry->ddent->mode & S_IFMT) | mode;
-	unlock(dentry->ddent_mutex);
+	lock(&dentry->mutex);
+	dentry->mode = (dentry->mode & S_IFMT) | mode;
+	dentry->dirty = 1;
+	unlock(&dentry->mutex);
 }
 
 int scan_dir(struct dentry *dentry, int (*func)(struct dentry *, void *),
@@ -761,7 +765,7 @@ int scan_dir(struct dentry *dentry, int (*func)(struct dentry *, void *),
 	unsigned i;
 	int err;
 
-	if (!S_ISDIR(dentry->ddent->mode))
+	if (!S_ISDIR(dentry->mode))
 		return -ENOTDIR;
 
 	/*
@@ -805,7 +809,7 @@ int dup_disk_dentry(struct dentry *parent, const struct disk_dentry *src)
 	struct disk_dentry *dst;
 	struct dentry *dentry;
 
-	dentry = add_dentry(parent, (char *)src->name, src->mode);
+	dentry = add_dentry(parent, (char *)src->name, le16toh(src->mode));
 	if (IS_ERR(dentry))
 		return -PTR_ERR(dentry);
 
@@ -813,7 +817,7 @@ int dup_disk_dentry(struct dentry *parent, const struct disk_dentry *src)
 	memcpy(dst->digest, src->digest, CHUNK_DIGEST_LEN);
 	memcpy(dst->secret_digest, src->secret_digest, CHUNK_DIGEST_LEN);
 
-	dentry->size = src->size;
+	dentry->size = le64toh(src->size);
 	dentry->dirty = 1;
 
 	__put_dentry(dentry);

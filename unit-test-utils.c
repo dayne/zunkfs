@@ -97,11 +97,11 @@ void dump_dentry_2(struct dentry *dentry, const char *indent)
 			dentry->ddent_cnode, dentry->parent,
 			dentry->ddent->name, dentry->ref_count,
 			(long)dentry->size,
-			S_ISDIR(dentry->ddent->mode) ? "dir" : 
-			S_ISREG(dentry->ddent->mode) ? "reg" :
+			S_ISDIR(dentry->mode) ? "dir" : 
+			S_ISREG(dentry->mode) ? "reg" :
 			"???");
 
-	if (!S_ISDIR(dentry->ddent->mode))
+	if (!S_ISDIR(dentry->mode))
 		return;
 
 	err = scan_dir(dentry, dump_child, (void *)(indent - 1));

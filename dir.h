@@ -7,6 +7,7 @@
 #include "chunk-tree.h"
 #include "mutex.h"
 #include "utils.h"
+#include "byteorder.h"
 
 #define DIR_AS_FILE	".super_secret_file"
 
@@ -16,12 +17,12 @@
 struct disk_dentry {
 	uint8_t digest[CHUNK_DIGEST_LEN];        // 20 20
 	uint8_t secret_digest[CHUNK_DIGEST_LEN]; // 20 40
-	uint16_t mode;                           //  2 42
+	le16_t mode;                             //  2 42
 	uint8_t flags;                           //  1 43
 	uint8_t mtime_csec;                      //  1 44
-	uint64_t size;                           //  8 52
-	uint32_t ctime;                          //  4 56
-	uint32_t mtime;                          //  4 60
+	le64_t size;                             //  8 52
+	le32_t ctime;                            //  4 56
+	le32_t mtime;                            //  4 60
 	uint8_t name[DDENT_NAME_MAX];            // .. 256
 } __attribute__((packed));
 
@@ -70,6 +71,7 @@ struct dentry {
 	 */
 	uint64_t size;
 	struct timeval mtime;
+	mode_t mode;
 };
 
 void __put_dentry(struct dentry *dentry);

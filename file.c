@@ -43,7 +43,7 @@ struct open_file {
  */
 static inline int cachable(const struct open_file *ofile)
 {
-	return S_ISREG(ofile->dentry->ddent->mode);
+	return S_ISREG(ofile->dentry->mode);
 }
 
 static inline void set_cached(struct chunk_node *cnode)
@@ -197,7 +197,7 @@ static int rw_file(struct open_file *ofile, char *buf, size_t bufsz,
 	int len, cplen;
 
 	file_size = ofile->dentry->size;
-	if (S_ISDIR(ofile->dentry->ddent->mode))
+	if (S_ISDIR(ofile->dentry->mode))
 		file_size *= sizeof(struct disk_dentry);
 	if (offset > file_size)
 		return -EINVAL;
@@ -238,7 +238,7 @@ static int rw_file(struct open_file *ofile, char *buf, size_t bufsz,
 	}
 
 	if (!read) {
-		assert(!S_ISDIR(ofile->dentry->ddent->mode));
+		assert(!S_ISDIR(ofile->dentry->mode));
 		if ((len + offset) > file_size)
 			ofile->dentry->size = len + offset;
 		gettimeofday(&ofile->dentry->mtime, NULL);
@@ -269,7 +269,7 @@ static int write_dir(struct open_file *ofile, const char *buf, size_t len,
 
 	while (total < len) {
 		ddent = (struct disk_dentry *)(buf + total);
-		if (!ddent->size)
+		if (!le64toh(ddent->size))
 			return -EINVAL;
 
 		err = dup_disk_dentry(ofile->dentry, ddent);
@@ -302,7 +302,7 @@ int write_file(struct open_file *ofile, const char *buf, size_t len, off_t off)
 	int retv;
 
 	lock_file(ofile);
-	if (S_ISDIR(ofile->dentry->ddent->mode))
+	if (S_ISDIR(ofile->dentry->mode))
 		retv = write_dir(ofile, buf, len, off);
 	else
 		retv = rw_file(ofile, (char *)buf, len, off, 0);

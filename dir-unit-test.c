@@ -352,6 +352,11 @@ static void test4(void)
 	printf("foo mode: 0%o (expected 0%o)\n", foo->ddent->mode,
 			S_IFREG | S_IRWXU);
 
+	dentry_chmod(foo, S_IRUSR | S_IXUSR);
+
+	printf("foo mode: 0%o (expected 0%o)\n", foo->ddent->mode,
+			S_IFREG | S_IRUSR | S_IXUSR);
+
 	put_dentry(foo);
 
 	bar = find_dentry("/bar", NULL);
@@ -360,6 +365,11 @@ static void test4(void)
 
 	printf("bar mode: 0%o (expected 0%o)\n", bar->ddent->mode,
 			S_IFDIR | S_IRWXU);
+
+	dentry_chmod(bar, S_IRUSR | S_IXUSR);
+
+	printf("bar mode: 0%o (expected 0%o)\n", bar->ddent->mode,
+			S_IFDIR | S_IRUSR | S_IXUSR);
 
 	put_dentry(bar);
 }

@@ -9,8 +9,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
+#include <sys/time.h>
 #include <sys/stat.h>
 
 #include "dir.h"
@@ -101,7 +101,8 @@ static struct dentry *new_dentry(struct dentry *parent,
 	dentry->ddent_mutex = ddent_mutex;
 	dentry->parent = parent;
 	dentry->size = ddent->size;
-	dentry->mtime = ddent->mtime;
+	dentry->mtime.tv_sec = ddent->mtime;
+	dentry->mtime.tv_usec = ddent->mtime_csec * 10000;
 
 	init_mutex(&dentry->mutex);
 	dentry->ref_count = 0;
@@ -241,7 +242,8 @@ static void flush_dentry(struct dentry *dentry)
 	
 	if (dentry->dirty) {
 		dentry->ddent->size = dentry->size;
-		dentry->ddent->mtime = dentry->mtime;
+		dentry->ddent->mtime = dentry->mtime.tv_sec;
+		dentry->ddent->mtime_csec = dentry->mtime.tv_usec / 10000;
 		if (dentry->ddent_cnode)
 			dentry->ddent_cnode->dirty = 1;
 		dentry->dirty = 0;
@@ -354,7 +356,7 @@ struct dentry *add_dentry(struct dentry *parent, const char *name, mode_t mode)
 {
 	struct dentry *dentry;
 	unsigned name_len;
-	time_t now;
+	struct timeval now;
 
 	assert(have_mutex(&parent->mutex));
 
@@ -377,14 +379,15 @@ struct dentry *add_dentry(struct dentry *parent, const char *name, mode_t mode)
 	if (IS_ERR(dentry))
 		return dentry;
 
-	now = time(NULL);
+	gettimeofday(&now, NULL);
 
 	namcpy(dentry->ddent->name, name);
 
 	dentry->ddent->mode = mode;
 	dentry->ddent->size = 0;
-	dentry->ddent->ctime = now;
-	dentry->ddent->mtime = now;
+	dentry->ddent->ctime = now.tv_sec;
+	dentry->ddent->mtime = now.tv_sec;
+	dentry->ddent->mtime_csec = now.tv_usec * 10000;
 
 	dentry->dirty = 1;
 	dentry->size = 0;
@@ -452,13 +455,17 @@ static int make_last_dentry(struct dentry *dentry, struct dentry *parent)
 
 static void __del_dentry(struct dentry *dentry, struct dentry *parent)
 {
+	struct timeval now;
+
 	assert(have_mutex(&parent->mutex));
 
 	dentry_ptr(dentry) = NULL;
 
+	gettimeofday(&now, NULL);
+
 	parent->size --;
 	parent->dirty = 1;
-	parent->mtime = time(NULL);
+	parent->mtime = now;
 }
 
 int del_dentry(struct dentry *dentry)

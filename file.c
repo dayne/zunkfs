@@ -9,7 +9,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
+#include <sys/time.h>
 #include <sys/stat.h>
 
 #include "zunkfs.h"
@@ -241,7 +241,7 @@ static int rw_file(struct open_file *ofile, char *buf, size_t bufsz,
 		assert(!S_ISDIR(ofile->dentry->ddent->mode));
 		if ((len + offset) > file_size)
 			ofile->dentry->size = len + offset;
-		ofile->dentry->mtime = time(NULL);
+		gettimeofday(&ofile->dentry->mtime, NULL);
 		ofile->dentry->dirty = 1;
 	}
 

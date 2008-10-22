@@ -145,6 +145,5 @@ extern int posix_fadvise(int, off_t, off_t, int);
 #define POSIX_FADV_RANDOM 0
 #endif
 
-
 #endif
 

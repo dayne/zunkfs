@@ -16,7 +16,9 @@
 struct disk_dentry {
 	uint8_t digest[CHUNK_DIGEST_LEN];        // 20 20
 	uint8_t secret_digest[CHUNK_DIGEST_LEN]; // 20 40
-	uint32_t mode;                           //  4 44
+	uint16_t mode;                           //  2 42
+	uint8_t flags;                           //  1 43
+	uint8_t mtime_csec;                      //  1 44
 	uint64_t size;                           //  8 52
 	uint32_t ctime;                          //  4 56
 	uint32_t mtime;                          //  4 60
@@ -67,7 +69,7 @@ struct dentry {
 	 * here to simplify locking
 	 */
 	uint64_t size;
-	time_t mtime;
+	struct timeval mtime;
 };
 
 void __put_dentry(struct dentry *dentry);

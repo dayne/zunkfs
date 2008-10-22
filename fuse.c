@@ -61,8 +61,9 @@ static int zunkfs_getattr(const char *path, struct stat *stbuf)
 	stbuf->st_gid = getgid();
 
 	stbuf->st_size = dentry->size;
-	stbuf->st_atime = dentry->mtime;
-	stbuf->st_mtime = dentry->mtime;
+
+	stbuf->st_atime = dentry->mtime.tv_sec;
+	stbuf->st_mtime = dentry->mtime.tv_sec;
 	stbuf->st_ctime = dentry->ddent->ctime;
 
 	stbuf->st_blksize = 4096;

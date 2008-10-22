@@ -39,7 +39,7 @@ static struct chunk_node *new_chunk_node(struct chunk_tree *ctree,
 	cnode->ctree = ctree;
 	cnode->chunk_digest = chunk_digest;
 	cnode->parent = NULL;
-	cnode->dirty = 0;
+	list_head_init(&cnode->dirty_entry);
 	cnode->ref_count = 0;
 
 	return cnode;
@@ -68,7 +68,7 @@ static int grow_chunk_tree(struct chunk_tree *ctree)
 	memcpy(old_root->chunk_digest, new_root->chunk_digest,
 			CHUNK_DIGEST_LEN);
 
-	new_root->dirty = 1;
+	mark_cnode_dirty(new_root);
 	new_root->ref_count = 2; /* old_root & ctree */
 	children_of(new_root)[0] = old_root;
 
@@ -139,7 +139,7 @@ again:
 		
 		if (max_path && max_path[i] != path[i]) {
 			memset(cnode->chunk_data, 0, CHUNK_SIZE);
-			cnode->dirty = 1;
+			mark_cnode_dirty(cnode);
 		} else {
 			err = ctree->ops->read_chunk(cnode->chunk_data,
 					cnode->chunk_digest);
@@ -181,14 +181,14 @@ static int flush_chunk_node(struct chunk_node *cnode)
 {
 	int err;
 
-	if (cnode->dirty) {
+	if (is_cnode_dirty(cnode)) {
 		err = cnode->ctree->ops->write_chunk(cnode->chunk_data,
 				cnode->chunk_digest);
 		if (err < 0)
 			return err;
 		if (cnode->parent)
-			cnode->parent->dirty = 1;
-		cnode->dirty = 0;
+			mark_cnode_dirty(cnode->parent);
+		list_del_init(&cnode->dirty_entry);
 	}
 
 	return 0;
@@ -242,6 +242,8 @@ int init_chunk_tree(struct chunk_tree *ctree, unsigned nr_leafs,
 	if (!root_digest)
 		return -EINVAL;
 
+	list_head_init(&ctree->dirty_list);
+
 	ctree->ops = ops;
 	ctree->nr_leafs = nr_leafs;
 	ctree->height = 0;
@@ -273,36 +275,27 @@ void free_chunk_tree(struct chunk_tree *ctree)
 	struct chunk_node *croot = ctree->root;
 
 	assert(croot->ref_count == 1);
-	if (croot->dirty)
+	if (is_cnode_dirty(croot))
 		flush_chunk_node(croot);
 	if (croot->_private)
 		free(croot->_private);
 	free(croot);
 }
 
-static int flush_chunk_node_recursive(struct chunk_node *cnode, unsigned height)
-{
-	struct chunk_node *child;
-	unsigned i;
-	int err;
-
-	if (height) {
-		for (i = 0; i < DIGESTS_PER_CHUNK; i ++) {
-			child = children_of(cnode)[i];
-			if (!child)
-				continue;
-			err = flush_chunk_node_recursive(child, height - 1);
-			if (err < 0)
-				return err;
-		}
-	}
-
-	return flush_chunk_node(cnode);
-}
-
 int flush_chunk_tree(struct chunk_tree *ctree)
 {
-	return flush_chunk_node_recursive(ctree->root, ctree->height);
+	struct chunk_node *cnode;
+	int error;
+
+	while (!list_empty(&ctree->dirty_list)) {
+		cnode = container_of(ctree->dirty_list.next,
+				struct chunk_node, dirty_entry);
+		error = flush_chunk_node(cnode);
+		if (error)
+			return error;
+	}
+
+	return 0;
 }
 
 

@@ -227,7 +227,7 @@ static int rw_file(struct open_file *ofile, char *buf, size_t bufsz,
 			memcpy(buf + len, cnode->chunk_data + chunk_off, cplen);
 		} else {
 			memcpy(cnode->chunk_data + chunk_off, buf + len, cplen);
-			cnode->dirty = 1;
+			mark_cnode_dirty(cnode);
 		}
 		len += cplen;
 

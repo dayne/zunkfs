@@ -13,7 +13,7 @@
 #include "dir.h"
 #include "chunk-db.h"
 
-#define NR_NODES	50 * DIGESTS_PER_CHUNK
+#define NR_NODES	3 * DIGESTS_PER_CHUNK
 
 static const char spaces[] = "                                                                                                                                                               ";
 #define indent_start (spaces + sizeof(spaces) - 1)

@@ -237,7 +237,7 @@ static void flush_dentry(struct dentry *dentry)
 					strerror(-err));
 			return;
 		}
-		if (dentry->chunk_tree.root->dirty)
+		if (is_cnode_dirty(dentry->chunk_tree.root))
 			dentry->dirty = 1;
 	}
 	
@@ -247,7 +247,7 @@ static void flush_dentry(struct dentry *dentry)
 		dentry->ddent->mtime = htole32(dentry->mtime.tv_sec);
 		dentry->ddent->mtime_csec = dentry->mtime.tv_usec / 10000;
 		if (dentry->ddent_cnode)
-			dentry->ddent_cnode->dirty = 1;
+			mark_cnode_dirty(dentry->ddent_cnode);
 		dentry->dirty = 0;
 	}
 }
@@ -436,8 +436,8 @@ static void swap_dentries(struct dentry *a, struct dentry *b)
 	*a->ddent = *b->ddent;
 	*b->ddent = tmp_ddent;
 
-	a->ddent_cnode->dirty = 1;
-	b->ddent_cnode->dirty = 1;
+	mark_cnode_dirty(a->ddent_cnode);
+	mark_cnode_dirty(b->ddent_cnode);
 }
 
 static int make_last_dentry(struct dentry *dentry, struct dentry *parent)

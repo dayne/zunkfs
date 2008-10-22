@@ -1,6 +1,8 @@
 #ifndef __CHUNK_TREE_H__
 #define __CHUNK_TREE_H__
 
+#include "list.h"
+
 struct chunk_tree;
 
 struct chunk_tree_operations {
@@ -14,7 +16,7 @@ struct chunk_node {
 	unsigned char *chunk_digest;
 	struct chunk_node *parent;
 	struct chunk_tree *ctree;
-	unsigned dirty:1;
+	struct list_head dirty_entry;
 	unsigned ref_count;
 	void *_private;
 };
@@ -24,7 +26,18 @@ struct chunk_tree {
 	unsigned nr_leafs;
 	unsigned height;
 	struct chunk_tree_operations *ops;
+	struct list_head dirty_list;
 };
+
+static inline int is_cnode_dirty(const struct chunk_node *cnode)
+{
+	return !list_empty(&cnode->dirty_entry);
+}
+
+static inline void mark_cnode_dirty(struct chunk_node *cnode)
+{
+	list_move_tail(&cnode->dirty_entry, &cnode->ctree->dirty_list);
+}
 
 struct chunk_node *get_nth_chunk(struct chunk_tree *ctree, unsigned chunk_nr);
 void put_chunk_node(struct chunk_node *cnode);

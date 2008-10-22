@@ -31,7 +31,7 @@ void dump_cnode(struct chunk_node *cnode, const char *indent, int height,
 
 	printf("%s%p:%p: %s", indent, cnode, cnode->chunk_digest,
 			digest_string(cnode->chunk_digest));
-	if (cnode->dirty)
+	if (is_cnode_dirty(cnode))
 		printf(" [dirty]");
 	else if (!verify_chunk(cnode->chunk_data, cnode->chunk_digest))
 		printf(" [ERR]");

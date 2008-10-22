@@ -26,6 +26,7 @@ static const char spaces[] = "                                                  
 static void test1(void);
 static void test2(void);
 static void test3(void);
+static void test4(void);
 
 int main(int argc, char **argv)
 {
@@ -63,8 +64,10 @@ int main(int argc, char **argv)
 		test1();
 	if (0)
 		test2();
-	if (1)
+	if (0)
 		test3();
+	if (1)
+		test4();
 
 	return 0;
 }
@@ -319,4 +322,46 @@ static void test3(void)
 
 	put_dentry(root);
 }
+
+static void test4(void)
+{
+	struct dentry *root;
+	struct dentry *foo;
+	struct dentry *bar;
+
+	root = find_dentry("/", NULL);
+	if (IS_ERR(root))
+		panic("find_dentry(/): %s\n", strerror(PTR_ERR(root)));
+
+	foo = locked_add_dentry(root, "foo", S_IFREG | S_IRWXU);
+	if (IS_ERR(foo))
+		panic("add_dentry(foo): %s\n", strerror(PTR_ERR(foo)));
+
+	bar = locked_add_dentry(root, "bar", S_IFDIR | S_IRWXU);
+	if (IS_ERR(bar))
+		panic("add_dentry(bar): %s\n", strerror(PTR_ERR(bar)));
+
+	put_dentry(foo);
+	put_dentry(bar);
+	put_dentry(root);
+
+	foo = find_dentry("/foo", NULL);
+	if (IS_ERR(foo))
+		panic("find_dentry(/foo): %s\n", strerror(PTR_ERR(foo)));
+
+	printf("foo mode: 0%o (expected 0%o)\n", foo->ddent->mode,
+			S_IFREG | S_IRWXU);
+
+	put_dentry(foo);
+
+	bar = find_dentry("/bar", NULL);
+	if (IS_ERR(bar))
+		panic("find_dentry(/bar): %s\n", strerror(PTR_ERR(bar)));
+
+	printf("bar mode: 0%o (expected 0%o)\n", bar->ddent->mode,
+			S_IFDIR | S_IRWXU);
+
+	put_dentry(bar);
+}
+
 

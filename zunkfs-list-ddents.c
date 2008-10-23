@@ -109,6 +109,7 @@ static int read_dentry(int fd, struct disk_dentry *de)
 
 int main(int argc, char **argv)
 {
+	const char *crypto;
 	char cwd[1024];
 	int fd, opt;
 
@@ -139,20 +140,28 @@ int main(int argc, char **argv)
 		}
 		if (!err)
 			break;
+
+		if ((dentry.flags & DDENT_USE_BLOWFISH))
+			crypto = "blowfish";
+		else
+			crypto = "xor";
+
 		if (full_output) {
-			printf("%s %s 0%0o %"PRIu64" %u %u %s\n", 
+			printf("%s %s 0%0o %"PRIu64" %u %u %s %s\n", 
 					digest_string(dentry.digest),
 					digest_string(dentry.secret_digest),
 					le16toh(dentry.mode),
 					le64toh(dentry.size),
 					le32toh(dentry.ctime),
 					le32toh(dentry.mtime),
+					crypto,
 					dentry.name);
 		} else {
-			printf("%s %s %"PRIu64" %s\n",
+			printf("%s %s %"PRIu64" %s %s\n",
 					digest_string(dentry.digest),
 					digest_string(dentry.secret_digest),
 					le64toh(dentry.size),
+					crypto,
 					dentry.name);
 		}
 	}

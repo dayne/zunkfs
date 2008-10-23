@@ -74,7 +74,8 @@ static const struct option long_opts[] = {
 };
 
 #define USAGE \
-"<file|dir> <digest> <secret digest> <size> <name>\n"\
+"<file|dir> <digest> <secret digest> <size> <crypto> <name>\n"\
+"Supported crypto methods: xor, blowfish\n"\
 "-h|--help\n"\
 "-d|--chunk-db <spec>\n"\
 "-l|--log [<E|W|T>,]<file|stderr|stdout>\n"
@@ -118,6 +119,7 @@ int main(int argc, char **argv)
 	char cwd[1024];
 	int i, fd, err, opt;
 	struct disk_dentry new_ddent;
+	char *crypto;
 
 	prog = basename(argv[0]);
 
@@ -158,6 +160,16 @@ int main(int argc, char **argv)
 	if (!le64toh(new_ddent.size)) {
 		fprintf(stderr, "Invalid size: %"PRIu64"\n\n", 
 				le64toh(new_ddent.size));
+		usage(-1);
+	}
+
+	crypto = argv[++i];
+	if (!strcmp(crypto, "xor"))
+		new_ddent.flags |= 0;
+	else if (!strcmp(crypto, "blowfish"))
+		new_ddent.flags |= DDENT_USE_BLOWFISH;
+	else {
+		fprintf(stderr, "Unknown crypto method: %s\n", crypto);
 		usage(-1);
 	}
 

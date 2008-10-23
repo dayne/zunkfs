@@ -13,6 +13,8 @@
 #include <sys/time.h>
 #include <sys/stat.h>
 
+#include <openssl/blowfish.h>
+
 #include "dir.h"
 
 static struct dentry *root_dentry = NULL;
@@ -28,16 +30,44 @@ static inline unsigned dentry_index(const struct dentry *dentry)
 		(struct disk_dentry *)dentry->ddent_cnode->chunk_data;
 }
 
+#define chunk_cnode(chunk) \
+	container_of(chunk, struct chunk_node, chunk_data)
+#define chunk_dentry(chunk) \
+	container_of(chunk_cnode(chunk)->ctree, struct dentry, chunk_tree)
+
+static void xor_chunk(unsigned char *dst, const unsigned char *src,
+		const unsigned char *secret)
+{
+	int i;
+	for (i = 0; i < CHUNK_SIZE; i ++)
+		*dst++ = *src++ ^ *secret++;
+}
+
+static void bf_chunk(unsigned char *dst, const unsigned char *src,
+		const unsigned char *secret, int enc)
+{
+	BF_KEY bf_key;
+	int i;
+
+	BF_set_key(&bf_key, CHUNK_SIZE, secret);
+
+	/* BF_ecb_encrypt works with 64bits at a time */
+	for (i = 0; i < CHUNK_SIZE/8; i ++) {
+		BF_ecb_encrypt(src, dst, &bf_key, enc);
+		src += 8;
+		dst += 8;
+	}
+}
+
 static int read_dentry_chunk(unsigned char *chunk, const unsigned char *digest)
 {
-	const struct chunk_node *cnode;
-	const struct dentry *dentry;
-	int i, err;
-
-	cnode = container_of(chunk, struct chunk_node, chunk_data);
-	dentry = container_of(cnode->ctree, struct dentry, chunk_tree);
+	const struct dentry *dentry = chunk_dentry(chunk);
+	int err;
 
 	assert(dentry->secret_chunk != NULL);
+
+	if ((dentry->ddent->flags & ~DDENT_VALID_FLAGS) != 0)
+		return -ENOTSUP;
 
 	/*
 	 * Chunk will be empty, so nothing to read.
@@ -51,30 +81,46 @@ static int read_dentry_chunk(unsigned char *chunk, const unsigned char *digest)
 	if (err < 0)
 		return err;
 
-	for (i = 0; i < CHUNK_SIZE; i ++)
-		chunk[i] ^= dentry->secret_chunk[i];
+	switch(dentry->ddent->flags & DDENT_CRYPTO_MASK) {
+	case DDENT_USE_XOR:
+		xor_chunk(chunk, chunk, dentry->secret_chunk);
+		break;
+	case DDENT_USE_BLOWFISH:
+		bf_chunk(chunk, chunk, dentry->secret_chunk, BF_DECRYPT);
+		break;
+	default:
+		return -ENOTSUP;
+	}
 
-	return err;
+	return CHUNK_SIZE;
 }
 
 static int write_dentry_chunk(const unsigned char *chunk, unsigned char *digest)
 {
-	const struct chunk_node *cnode;
-	const struct dentry *dentry;
+	const struct dentry *dentry = chunk_dentry(chunk);
 	unsigned char real_chunk[CHUNK_SIZE];
-	int i, err;
-
-	cnode = container_of(chunk, struct chunk_node, chunk_data);
-	dentry = container_of(cnode->ctree, struct dentry, chunk_tree);
+	int err;
 
 	assert(dentry->secret_chunk != NULL);
 
-	for (i = 0; i < CHUNK_SIZE; i ++)
-		real_chunk[i] = chunk[i] ^ dentry->secret_chunk[i];
+	if ((dentry->ddent->flags & ~DDENT_VALID_FLAGS) != 0)
+		return -ENOTSUP;
+
+	switch(dentry->ddent->flags & DDENT_CRYPTO_MASK) {
+	case DDENT_USE_XOR:
+		xor_chunk(real_chunk, chunk, dentry->secret_chunk);
+		break;
+	case DDENT_USE_BLOWFISH:
+		bf_chunk(real_chunk, chunk, dentry->secret_chunk, BF_ENCRYPT);
+		break;
+	default:
+		return -ENOTSUP;
+	}
 
 	err = write_chunk(real_chunk, digest);
 	if (err == -EEXIST)
 		return CHUNK_SIZE;
+
 	return err;
 }
 
@@ -354,7 +400,8 @@ out:
 	return dentry;
 }
 
-struct dentry *add_dentry(struct dentry *parent, const char *name, mode_t mode)
+struct dentry *__add_dentry(struct dentry *parent, const char *name,
+		mode_t mode, uint8_t flags)
 {
 	struct dentry *dentry;
 	unsigned name_len;
@@ -390,6 +437,7 @@ struct dentry *add_dentry(struct dentry *parent, const char *name, mode_t mode)
 	dentry->ddent->ctime = htole32(now.tv_sec);
 	dentry->ddent->mtime = htole32(now.tv_sec);
 	dentry->ddent->mtime_csec = now.tv_usec * 10000;
+	dentry->ddent->flags = flags;
 
 	dentry->dirty = 1;
 	dentry->size = 0;
@@ -809,7 +857,8 @@ int dup_disk_dentry(struct dentry *parent, const struct disk_dentry *src)
 	struct disk_dentry *dst;
 	struct dentry *dentry;
 
-	dentry = add_dentry(parent, (char *)src->name, le16toh(src->mode));
+	dentry = __add_dentry(parent, (char *)src->name, le16toh(src->mode),
+			src->flags);
 	if (IS_ERR(dentry))
 		return -PTR_ERR(dentry);
 

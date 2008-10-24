@@ -27,6 +27,14 @@
 #include "zunkfs.h"
 #include "chunk-db.h"
 
+struct node {
+	int fd;
+	struct bufferevent *bev;
+	struct sockaddr_in addr;
+	struct list_head node_entry;
+	struct event connect_event;
+};
+
 struct forward_request {
 	int min_dist;
 	unsigned ref_count;
@@ -37,12 +45,12 @@ struct forward_request {
 	struct timeval timeout;
 };
 
-struct node {
-	int fd;
-	struct bufferevent *bev;
-	struct sockaddr_in addr;
-	struct list_head node_entry;
-	struct event connect_event;
+struct push_request {
+	unsigned char digest[CHUNK_DIGEST_LEN];
+	struct list_head request_entry;
+	struct node *node;
+	int max_d;
+	char value[0];
 };
 
 #define node_addr(node)		((node)->addr.sin_addr)
@@ -70,7 +78,8 @@ struct node {
 
 static LIST_HEAD(node_list);
 static LIST_HEAD(client_list);
-static LIST_HEAD(request_list);
+static LIST_HEAD(forward_list);
+static LIST_HEAD(push_list);
 
 static char *prog;
 static struct sockaddr_in my_addr;
@@ -110,13 +119,21 @@ static inline unsigned char *__node_digest(const struct node *node,
 
 #define node_digest(node) __node_digest(node, alloca(SHA_DIGEST_LENGTH))
 
+static void __push_chunk(struct push_request *);
+
 static void free_node(struct node *node)
 {
+	struct push_request *r;
+
 	event_del(&node->connect_event);
 	list_del(&node->node_entry);
 	close(node->fd);
 	bufferevent_free(node->bev);
 	free(node);
+
+	list_for_each_entry(r, &push_list, request_entry)
+		if (r->node == node)
+			__push_chunk(r);
 }
 
 static int trim_nodes(void)
@@ -215,7 +232,7 @@ static int connect_node(struct node *node)
 	bufferevent_write_buffer(node->bev, evbuf);
 	evbuffer_free(evbuf);
 
-	list_for_each_entry(r, &request_list, request_entry) {
+	list_for_each_entry(r, &forward_list, request_entry) {
 		int d = node_distance(node, r->chunk_digest);
 		if (d < r->min_dist) {
 			if (bufferevent_write(node->bev,
@@ -518,7 +535,7 @@ static void forward_chunk(const char *value, const unsigned char *digest,
 	timeout_set(&req->timeout_event, request_timeoutcb, req);
 	timeout_add(&req->timeout_event, &req->timeout);
 
-	list_add(&req->request_entry, &request_list);
+	list_add(&req->request_entry, &forward_list);
 	pending_forwards ++;
 
 	return;
@@ -531,6 +548,26 @@ discard:
 static void push_chunk(const char *value, const unsigned char *digest,
 		unsigned max_d)
 {
+	struct push_request *r;
+
+	r = malloc(sizeof(struct push_request) + strlen(value) + 1);
+	if (!r) {
+		WARNING("Failed to push %s: %s\n", digest_string(digest),
+				strerror(ENOMEM));
+		return;
+	}
+
+	strcpy(r->value, value);
+	memcpy(r->digest, digest, CHUNK_DIGEST_LEN);
+	r->max_d = max_d;
+
+	list_add_tail(&r->request_entry, &push_list);
+
+	__push_chunk(r);
+}
+
+static void __push_chunk(struct push_request *r)
+{
 	struct evbuffer *evbuf;
 	struct node *node_vec[NODE_VEC_MAX];
 	int dist_vec[NODE_VEC_MAX];
@@ -538,36 +575,49 @@ static void push_chunk(const char *value, const unsigned char *digest,
 
 	evbuf = evbuffer_new();
 	if (!evbuf)
-		return;
+		goto free_request;
 
-	n = __nearest_nodes(digest, node_vec, dist_vec, NODE_VEC_MAX);
+	n = __nearest_nodes(r->digest, node_vec, dist_vec, NODE_VEC_MAX);
 	if (!n)
-		goto out;
+		goto free_request;
 
+	/*
+	 * Let the destination know where the chunk may be sent to.
+	 */
 	for (i = 0; i < n; i ++) {
-		if (dist_vec[i] >= max_d)
+		if (dist_vec[i] >= r->max_d)
 			continue;
 		if (evbuffer_add_printf(evbuf, "%s %s:%u\r\n",
 					STORE_NODE,
 					node_addr_string(node_vec[i]),
 					node_port(node_vec[i])) < 0)
-			goto out;
+			goto free_request;
 		if (best == -1 || dist_vec[best] < dist_vec[i])
 			best = i;
 	}
 
 	if (best == -1)
-		goto out;
+		goto free_request;
+
 	if (evbuffer_add_printf(evbuf, "%s %d %s\r\n",
-				PUSH_CHUNK, dist_vec[best], value) < 0)
-		goto out;
+				PUSH_CHUNK, dist_vec[best], r->value) < 0)
+		goto free_request;
+
+	r->node = node_vec[best];
 
 	bufferevent_write_buffer(node_vec[best]->bev, evbuf);
-out:
 	evbuffer_free(evbuf);
 
-	TRACE("digest=%s max_d=%u n=%d best=%d\n", 
-			digest_string(digest), max_d, n, best);
+	TRACE("pushed %s to %s:%u (max_d=%u d=%d)\n",
+			digest_string(r->digest),
+			node_addr_string(node_vec[best]),
+			node_port(node_vec[best]));
+	return;
+free_request:
+	evbuffer_free(evbuf);
+	WARNING("Failed to send push request %s\n", digest_string(r->digest));
+	list_del(&r->request_entry);
+	free(r);
 }
 
 static inline void request_done(const char *key_str, struct evbuffer *output)
@@ -577,22 +627,33 @@ static inline void request_done(const char *key_str, struct evbuffer *output)
 
 static void finish_request(const unsigned char *digest)
 {
-	struct forward_request *r;
+	struct forward_request *fr;
+	struct push_request *pr;
 
-	list_for_each_entry(r, &request_list, request_entry)
-		if (!memcmp(digest, r->chunk_digest, CHUNK_DIGEST_LEN))
-			goto found;
+	list_for_each_entry(fr, &forward_list, request_entry)
+		if (!memcmp(digest, fr->chunk_digest, CHUNK_DIGEST_LEN))
+			goto found_forward_request;
+
+	list_for_each_entry(pr, &push_list, request_entry)
+		if (!memcmp(digest, pr->digest, CHUNK_DIGEST_LEN))
+			goto found_push_request;
 	return;
-found:
-	if (!--r->ref_count) {
+
+found_forward_request:
+	if (!--fr->ref_count) {
 		TRACE("forward request complete %s\n",
-				digest_string(r->chunk_digest));
-		list_del(&r->request_entry);
-		event_del(&r->timeout_event);
-		evbuffer_free(r->evbuf);
-		free(r);
+				digest_string(fr->chunk_digest));
+		list_del(&fr->request_entry);
+		event_del(&fr->timeout_event);
+		evbuffer_free(fr->evbuf);
+		free(fr);
 		pending_forwards --;
 	}
+	return;
+found_push_request:
+	TRACE("push request complete %s\n", digest_string(pr->digest));
+	list_del(&pr->request_entry);
+	free(pr);
 }
 
 static void proc_msg(const char *buf, size_t len, struct node *node)

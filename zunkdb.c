@@ -915,22 +915,12 @@ int main(int argc, char **argv)
 {
 	struct event accept_event;
 	int sk, reuse = 1, opt, err;
-	char cwd[PATH_MAX];
 
 	prog = basename(argv[0]);
 
 	my_addr.sin_family = AF_INET;
 	my_addr.sin_addr.s_addr = INADDR_ANY;
 	my_addr.sin_port = htons(9876);
-
-	getcwd(cwd, PATH_MAX);
-
-	if (strlen(cwd) >= PATH_MAX - sizeof("/.chunks")) {
-		fprintf(stderr, "cwd: %s\n", strerror(ENAMETOOLONG));
-		exit(-1);
-	}
-
-	strcat(cwd, "/.chunks");
 
 	if (!event_init()) {
 		fprintf(stderr, "event_init: %s\n", strerror(errno));

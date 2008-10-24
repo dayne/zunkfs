@@ -810,13 +810,14 @@ static const struct option long_opts[] = {
 "                                  stdout, or stderr.\n"\
 "-c|--chunk-db <spec>              Add a chunk-db.\n"\
 "-d|--daemonize                    Fork into background.\n"\
-"-o|--promote-nodes                Allow promoting client nodes to server nodes.\n"\
+"-o|--promote-nodes                Allow promoting client nodes to server\n"\
+"                                  nodes.\n"\
 "-t|--forward-timeout <seconds>    Maximum duration of a forward request.\n"\
 "                                  Default = 60.\n"\
 "-x|--max-forwards <count>         Maximum number of pending forwards.\n"\
 "                                  Use to limit memory usage. Default = 1000\n"\
-"-s|--slow-uplink                  Uplink is slow, use push method to store chunks\n"\
-"                                  on other nodes.\n"\
+"-s|--slow-uplink                  Uplink is slow, use push method to store\n"\
+"                                  chunks on other nodes.\n"\
 "\nChunk-db specs:\n"
 
 static void usage(int exit_code)
@@ -952,7 +953,8 @@ int main(int argc, char **argv)
 		usage(-1);
 
 	if (!nr_chunkdbs) {
-		fprintf(stderr, "Must specify at least one chunk database.\n\n");
+		fprintf(stderr, "Must specify at least one chunk "
+				"database.\n\n");
 		usage(-1);
 	}
 

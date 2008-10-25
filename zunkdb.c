@@ -546,7 +546,7 @@ discard:
 }
 
 static void push_chunk(const char *value, const unsigned char *digest,
-		unsigned max_d)
+		int max_d)
 {
 	struct push_request *r;
 
@@ -560,6 +560,8 @@ static void push_chunk(const char *value, const unsigned char *digest,
 	strcpy(r->value, value);
 	memcpy(r->digest, digest, CHUNK_DIGEST_LEN);
 	r->max_d = max_d;
+	if (r->max_d < 0)
+		r->max_d = INT_MAX;
 
 	list_add_tail(&r->request_entry, &push_list);
 
@@ -596,8 +598,11 @@ static void __push_chunk(struct push_request *r)
 			best = i;
 	}
 
-	if (best == -1)
+	if (best == -1) {
+		TRACE("No nodes closer to %s (n=%d, max_d=%d)\n", 
+				digest_string(r->digest), n, r->max_d);
 		goto free_request;
+	}
 
 	if (evbuffer_add_printf(evbuf, "%s %d %s\r\n",
 				PUSH_CHUNK, dist_vec[best], r->value) < 0)
@@ -625,7 +630,7 @@ static inline void request_done(const char *key_str, struct evbuffer *output)
 	evbuffer_add_printf(output, "%s %s\r\n", REQUEST_DONE, key_str);
 }
 
-static void finish_request(const unsigned char *digest)
+static void finish_request(const unsigned char *digest, const struct node *node)
 {
 	struct forward_request *fr;
 	struct push_request *pr;
@@ -635,7 +640,8 @@ static void finish_request(const unsigned char *digest)
 			goto found_forward_request;
 
 	list_for_each_entry(pr, &push_list, request_entry)
-		if (!memcmp(digest, pr->digest, CHUNK_DIGEST_LEN))
+		if (pr->node == node && 
+				!memcmp(digest, pr->digest, CHUNK_DIGEST_LEN))
 			goto found_push_request;
 	return;
 
@@ -739,10 +745,7 @@ static void proc_msg(const char *buf, size_t len, struct node *node)
 			return;
 		}
 
-		if (!slow_uplink)
-			forward_chunk(end + 1, digest, max_d);
-		else
-			push_chunk(end + 1, digest, max_d);
+		push_chunk(end + 1, digest, max_d);
 
 		request_done(digest_string(digest), output);
 
@@ -751,7 +754,7 @@ static void proc_msg(const char *buf, size_t len, struct node *node)
 		len -= REQUEST_DONE_LEN + 1;
 
 		__string_digest(msg, digest);
-		finish_request(digest);
+		finish_request(digest, node);
 
 		evbuffer_free(output);
 		return;

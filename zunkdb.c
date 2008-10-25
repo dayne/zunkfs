@@ -83,6 +83,7 @@ static LIST_HEAD(push_list);
 
 static char *prog;
 static struct sockaddr_in my_addr;
+static struct in_addr nat_addr;
 static unsigned nr_chunkdbs = 0;
 static unsigned daemonize = 0;
 static unsigned may_promote = 0;
@@ -266,6 +267,9 @@ static int store_node(const struct sockaddr_in *addr)
 {
 	struct node *node;
 	int err;
+
+	if (addr->sin_addr.s_addr == nat_addr.s_addr)
+		return -EEXIST;
 
 	if (find_node(addr))
 		return -EEXIST;
@@ -835,6 +839,7 @@ enum {
 	OPT_FORWARD_TIMEOUT = 't',
 	OPT_MAX_FORWARD = 'x',
 	OPT_SLOW_UPLINK = 's',
+	OPT_NAT_ADDR = 'n',
 };
 
 static const char short_opts[] = {
@@ -848,6 +853,7 @@ static const char short_opts[] = {
 	OPT_FORWARD_TIMEOUT, OPT_REQUIRED_ARG,
 	OPT_MAX_FORWARD, OPT_REQUIRED_ARG,
 	OPT_SLOW_UPLINK,
+	OPT_NAT_ADDR, OPT_REQUIRED_ARG,
 	0
 };
 
@@ -862,6 +868,7 @@ static const struct option long_opts[] = {
 	{ "max-forwards", required_argument, NULL, OPT_MAX_FORWARD },
 	{ "log", required_argument, NULL, OPT_LOG },
 	{ "slow-uplink", no_argument, NULL, OPT_SLOW_UPLINK },
+	{ "nat", required_argument, NULL, OPT_NAT_ADDR },
 	{ NULL }
 };
 
@@ -882,6 +889,8 @@ static const struct option long_opts[] = {
 "                                  Use to limit memory usage. Default = 1000\n"\
 "-s|--slow-uplink                  Uplink is slow, use push method to store\n"\
 "                                  chunks on other nodes.\n"\
+"-n|--nat <ip>                     If behind a NAT firewall, ignore \n"\
+"                                  connections coming from the NAT.\n"\
 "\nChunk-db specs:\n"
 
 static void usage(int exit_code)
@@ -955,6 +964,13 @@ static int proc_opt(int opt, char *arg)
 
 	case OPT_SLOW_UPLINK:
 		slow_uplink = 1;
+		return 0;
+
+	case OPT_NAT_ADDR:
+		if (!inet_aton(optarg, &nat_addr)) {
+			fprintf(stderr, "Invalid NAT address: %s\n", optarg);
+			return -EINVAL;
+		}
 		return 0;
 
 	default:

@@ -119,7 +119,7 @@ static inline unsigned char *__node_digest(const struct node *node,
 
 #define node_digest(node) __node_digest(node, alloca(SHA_DIGEST_LENGTH))
 
-static void __push_chunk(struct push_request *);
+static void __push_chunk(struct push_request *, struct node *);
 
 static void free_node(struct node *node)
 {
@@ -133,7 +133,7 @@ static void free_node(struct node *node)
 
 	list_for_each_entry(r, &push_list, request_entry)
 		if (r->node == node)
-			__push_chunk(r);
+			__push_chunk(r, NULL);
 }
 
 static int trim_nodes(void)
@@ -202,7 +202,8 @@ static int setup_node(struct node *node)
 	return 0;
 }
 
-static void nearest_nodes(const unsigned char *, struct evbuffer *, int);
+static void nearest_nodes(const unsigned char *, struct evbuffer *, int,
+		struct node *node);
 
 static inline int node_distance(const struct node *node,
 		const unsigned char *key)
@@ -227,7 +228,7 @@ static int connect_node(struct node *node)
 	evbuffer_add_printf(evbuf, "%s :%u\r\n", STORE_NODE,
 			ntohs(my_addr.sin_port));
 
-	nearest_nodes(node_digest(node), evbuf, NODE_VEC_MAX);
+	nearest_nodes(node_digest(node), evbuf, NODE_VEC_MAX, node);
 
 	bufferevent_write_buffer(node->bev, evbuf);
 	evbuffer_free(evbuf);
@@ -325,7 +326,7 @@ static int promote_node(struct node *node, uint16_t port)
 	if (!evbuf)
 		return -ENOMEM;
 
-	nearest_nodes(node_digest(node), evbuf, NODE_VEC_MAX);
+	nearest_nodes(node_digest(node), evbuf, NODE_VEC_MAX, node);
 	bufferevent_write_buffer(node->bev, evbuf);
 	evbuffer_free(evbuf);
 
@@ -390,7 +391,7 @@ static int dns_resolve(char *addr_str)
 }
 
 static int __nearest_nodes(const unsigned char *key, struct node **node_vec,
-		int *dist_vec, int max)
+		int *dist_vec, int max, struct node *exclude)
 {
 	int d, i, n, count = -1;
 	struct node *node;
@@ -399,6 +400,8 @@ static int __nearest_nodes(const unsigned char *key, struct node **node_vec,
 		dist_vec[i] = INT_MAX;
 
 	list_for_each_entry(node, &node_list, node_entry) {
+		if (node == exclude)
+			continue;
 		d = node_distance(node, key);
 		/* find maximum, and replace.. */
 		n = 0;
@@ -417,13 +420,13 @@ static int __nearest_nodes(const unsigned char *key, struct node **node_vec,
 }
 
 static void nearest_nodes(const unsigned char *key, struct evbuffer *output,
-		int max)
+		int max, struct node *exclude)
 {
 	struct node *node_vec[max];
 	int dist_vec[max];
 	int i, count;
 
-	count = __nearest_nodes(key, node_vec, dist_vec, max);
+	count = __nearest_nodes(key, node_vec, dist_vec, max, exclude);
 	TRACE("%d nodes near %s\n", count, digest_string(key));
 	for (i = 0; i < count; i ++) {
 		evbuffer_add_printf(output, "%s %s:%u\r\n",
@@ -480,7 +483,7 @@ static void request_timeoutcb(int fd, short event, void *arg)
 }
 
 static void forward_chunk(const char *value, const unsigned char *digest,
-		unsigned max_d)
+		unsigned max_d, struct node *exclude)
 {
 	struct forward_request *req;
 	struct node *node_vec[NODE_VEC_MAX];
@@ -502,7 +505,7 @@ static void forward_chunk(const char *value, const unsigned char *digest,
 				value) < 0)
 		goto discard;
 
-	n = __nearest_nodes(digest, node_vec, dist_vec, NODE_VEC_MAX);
+	n = __nearest_nodes(digest, node_vec, dist_vec, NODE_VEC_MAX, exclude);
 	if (!n)
 		goto discard;
 
@@ -546,7 +549,7 @@ discard:
 }
 
 static void push_chunk(const char *value, const unsigned char *digest,
-		int max_d)
+		int max_d, struct node *exclude)
 {
 	struct push_request *r;
 
@@ -565,45 +568,55 @@ static void push_chunk(const char *value, const unsigned char *digest,
 
 	list_add_tail(&r->request_entry, &push_list);
 
-	__push_chunk(r);
+	__push_chunk(r, exclude);
 }
 
-static void __push_chunk(struct push_request *r)
+static void __push_chunk(struct push_request *r, struct node *exclude)
 {
 	struct evbuffer *evbuf;
 	struct node *node_vec[NODE_VEC_MAX];
 	int dist_vec[NODE_VEC_MAX];
-	int i, n, best = -1;
+	int i, j, n, best = -1;
 
 	evbuf = evbuffer_new();
 	if (!evbuf)
 		goto free_request;
 
-	n = __nearest_nodes(r->digest, node_vec, dist_vec, NODE_VEC_MAX);
+	n = __nearest_nodes(r->digest, node_vec, dist_vec, NODE_VEC_MAX, 
+			exclude);
 	if (!n)
-		goto free_request;
+		goto no_nodes;
 
-	/*
-	 * Let the destination know where the chunk may be sent to.
-	 */
+	/* Remove nodes that are too far away. */
+	for (i = j = 0; i < n; i ++) {
+		if (dist_vec[i] < r->max_d)
+			j ++;
+		dist_vec[j] = dist_vec[i];
+		node_vec[j] = node_vec[i];
+	}
+
+	n = i;
+	if (!n)
+		goto no_nodes;
+
+	/* Find the most distant node in the list. */
+	for (i = 0; i < n; i ++)
+		if (best == -1 || dist_vec[best] < dist_vec[i])
+			best = i;
+
+	/* Now let that node know about other nodes that may be close */
 	for (i = 0; i < n; i ++) {
-		if (dist_vec[i] >= r->max_d)
+		if (i == best)
 			continue;
+
 		if (evbuffer_add_printf(evbuf, "%s %s:%u\r\n",
 					STORE_NODE,
 					node_addr_string(node_vec[i]),
 					node_port(node_vec[i])) < 0)
 			goto free_request;
-		if (best == -1 || dist_vec[best] < dist_vec[i])
-			best = i;
 	}
 
-	if (best == -1) {
-		TRACE("No nodes closer to %s (n=%d, max_d=%d)\n", 
-				digest_string(r->digest), n, r->max_d);
-		goto free_request;
-	}
-
+	/* Finally, send the chunk */
 	if (evbuffer_add_printf(evbuf, "%s %d %s\r\n",
 				PUSH_CHUNK, dist_vec[best], r->value) < 0)
 		goto free_request;
@@ -616,8 +629,12 @@ static void __push_chunk(struct push_request *r)
 	TRACE("pushed %s to %s:%u (max_d=%u d=%d)\n",
 			digest_string(r->digest),
 			node_addr_string(node_vec[best]),
-			node_port(node_vec[best]));
+			node_port(node_vec[best]),
+			r->max_d, dist_vec[best]);
 	return;
+no_nodes:
+	TRACE("No nodes closer to %s (n=%d, max_d=%d)\n", 
+			digest_string(r->digest), n, r->max_d);
 free_request:
 	evbuffer_free(evbuf);
 	WARNING("Failed to send push request %s\n", digest_string(r->digest));
@@ -684,7 +701,7 @@ static void proc_msg(const char *buf, size_t len, struct node *node)
 		__string_digest(msg, digest);
 
 		if (!find_value(digest, output))
-			nearest_nodes(digest, output, NODE_VEC_MAX);
+			nearest_nodes(digest, output, NODE_VEC_MAX, node);
 
 		request_done(msg, output);
 		
@@ -697,7 +714,7 @@ static void proc_msg(const char *buf, size_t len, struct node *node)
 			return;
 		}
 
-		nearest_nodes(digest, output, NODE_VEC_MAX);
+		nearest_nodes(digest, output, NODE_VEC_MAX, node);
 		request_done(digest_string(digest), output);
 
 	} else if (!strncmp(msg, STORE_NODE, STORE_NODE_LEN)) {
@@ -725,9 +742,9 @@ static void proc_msg(const char *buf, size_t len, struct node *node)
 		}
 
 		if (!slow_uplink)
-			forward_chunk(msg, digest, -1);
+			forward_chunk(msg, digest, -1, node);
 		else
-			push_chunk(msg, digest, -1);
+			push_chunk(msg, digest, -1, node);
 
 		request_done(digest_string(digest), output);
 
@@ -745,7 +762,7 @@ static void proc_msg(const char *buf, size_t len, struct node *node)
 			return;
 		}
 
-		push_chunk(end + 1, digest, max_d);
+		push_chunk(end + 1, digest, max_d, node);
 
 		request_done(digest_string(digest), output);
 

@@ -992,16 +992,23 @@ static int do_daemonize(void)
 	}
 }
 
+static void sigpipecb(int fd, short event, void *arg)
+{
+}
+
 int main(int argc, char **argv)
 {
 	struct event accept_event;
 	int sk, reuse = 1, opt, err;
+	struct event sigpipe_event;
 
 	prog = basename(argv[0]);
 
 	my_addr.sin_family = AF_INET;
 	my_addr.sin_addr.s_addr = INADDR_ANY;
 	my_addr.sin_port = htons(9876);
+
+	signal_set(&sigpipe_event, SIGPIPE, sigpipecb, NULL);
 
 	if (!event_init()) {
 		fprintf(stderr, "event_init: %s\n", strerror(errno));
@@ -1012,6 +1019,8 @@ int main(int argc, char **argv)
 		fprintf(stderr, "evdns_init: %s\n", strerror(errno));
 		exit(-2);
 	}
+
+	signal_add(&sigpipe_event, NULL);
 
 	while ((opt = getopt_long(argc, argv, short_opts, long_opts, NULL))
 			!= -1) {
@@ -1071,5 +1080,6 @@ int main(int argc, char **argv)
 	fprintf(stderr, "Event processing done.\n");
 	return 0;
 }
+
 
 

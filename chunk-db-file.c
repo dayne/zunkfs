@@ -18,6 +18,7 @@
 #include "zunkfs.h"
 #include "mutex.h"
 #include "chunk-db.h"
+#include "byteorder.h"
 
 #define MAX_INDEX		(CHUNK_SIZE / (sizeof(struct index)))
 #define SPLIT_AT		((MAX_INDEX + 1) / 2)
@@ -38,12 +39,17 @@
 */
 
 struct index {
+	be32_t hash;
+	be32_t chunk_nr;
+}__attribute__((packed));
+
+struct root_index {
 	uint32_t hash;
 	uint32_t chunk_nr;
 };
 
 struct db {
-	struct index root[MAX_INDEX];
+	struct root_index root[MAX_INDEX];
 	int fd;
 	uint32_t next_nr;
 	unsigned ro:1;
@@ -92,7 +98,7 @@ static inline void unmap_chunk(void *chunk)
 /* used for sorting entries in the root index */
 static int compar_root_index(const void *a, const void *b)
 {
-	const struct index *i = a, *j = b;
+	const struct root_index *i = a, *j = b;
 	assert(i->hash != j->hash);
 	return i->hash < j->hash ? -1 : 1;
 }
@@ -105,18 +111,19 @@ static int compar_root_index(const void *a, const void *b)
 */
 static int build_root(struct db *db)
 {
+	struct index idx;
 	uint32_t i;
 
 	for (i = 1; i < MAX_INDEX; i ++) {
-		ssize_t n = pread(db->fd, &db->root[i], sizeof(struct index),
+		ssize_t n = pread(db->fd, &idx, sizeof(struct index),
 				(off_t)i * CHUNK_SIZE);
 		if (n < 0)
 			return -errno;
 		assert(n == sizeof(struct index));
-		if (db->root[i].chunk_nr == INVALID_CHUNK_NR)
+		if (be32toh(idx.chunk_nr) == INVALID_CHUNK_NR)
 			break;
-		db->root[i].hash = ntohl(db->root[i].hash);
-		db->root[i].chunk_nr = ntohl(db->root[i].chunk_nr);
+		db->root[i].hash = be32toh(idx.hash);
+		db->root[i].chunk_nr = i;
 	}
 
 	/*
@@ -132,7 +139,7 @@ static int build_root(struct db *db)
 
 static int hash_insert(struct db *db, uint32_t hash, uint32_t chunk_nr)
 {
-	struct index *root = db->root;
+	struct root_index *root = db->root;
 	struct index *leaf;
 	struct index *split;
 	int i, split_at, leaf_nr;
@@ -151,19 +158,20 @@ static int hash_insert(struct db *db, uint32_t hash, uint32_t chunk_nr)
 
 	/* XXX: this may need to become a binary search */
 	for (i = 0; i < MAX_INDEX; i ++) {
-		if (leaf[i].chunk_nr == INVALID_CHUNK_NR)
+		if (be32toh(leaf[i].chunk_nr) == INVALID_CHUNK_NR)
 			break;
-		if (hash < ntohl(leaf[i].hash))
+		if (hash < be32toh(leaf[i].hash))
 			break;
 	}
 
-	if (leaf[MAX_INDEX-1].chunk_nr != INVALID_CHUNK_NR)
+	if (be32toh(leaf[MAX_INDEX-1].chunk_nr) != INVALID_CHUNK_NR)
 		goto split_leaf;
 
 do_insert:
 	memmove(leaf + i + 1, leaf + i, sizeof(*leaf) * (MAX_INDEX - i - 1));
-	leaf[i].hash = htonl(hash);
-	leaf[i].chunk_nr = htonl(chunk_nr);
+	leaf[i].hash = htobe32(hash);
+	leaf[i].chunk_nr = htobe32(chunk_nr);
+
 	unmap_chunk(leaf);
 	return 0;
 split_leaf:
@@ -172,10 +180,10 @@ split_leaf:
 	 * all it stays in the same leaf.
 	 */
 	for (split_at = SPLIT_AT; split_at != MAX_INDEX; split_at ++)
-		if (leaf[split_at].hash != leaf[split_at-1].hash)
+		if (leaf[split_at].hash.v != leaf[split_at-1].hash.v)
 			goto split_here;
 	for (split_at = SPLIT_AT-1; split_at > 0; split_at --)
-		if (leaf[split_at].hash != leaf[split_at-1].hash)
+		if (leaf[split_at].hash.v != leaf[split_at-1].hash.v)
 			goto split_here;
 	unmap_chunk(leaf);
 	return -ENOSPC;
@@ -192,7 +200,7 @@ split_here:
 	memmove(root + leaf_nr + 1, root + leaf_nr, sizeof(*root) *
 			(root[0].hash - leaf_nr));
 
-	root[leaf_nr].hash = ntohl(split[0].hash);
+	root[leaf_nr].hash = be32toh(split[0].hash);
 	root[leaf_nr].chunk_nr = root[0].hash;
 
 	root[0].hash ++;
@@ -209,7 +217,7 @@ split_here:
 
 unsigned char *lookup_chunk(struct db *db, const unsigned char *digest)
 {
-	struct index *root = db->root;
+	struct root_index *root = db->root;
 	struct index *leaf;
 	uint32_t hash = *(uint32_t *)digest;
 	int i, leaf_nr;
@@ -225,12 +233,12 @@ unsigned char *lookup_chunk(struct db *db, const unsigned char *digest)
 		return (void *)leaf;
 
 	for (i = 0; i < MAX_INDEX; i ++) {
-		if (leaf[i].chunk_nr == INVALID_CHUNK_NR)
+		if (be32toh(leaf[i].chunk_nr) == INVALID_CHUNK_NR)
 			break;
-		if (hash < ntohl(leaf[i].hash))
+		if (hash < be32toh(leaf[i].hash))
 			break;
-		if (hash == ntohl(leaf[i].hash)) {
-			chunk = map_chunk(db, ntohl(leaf[i].chunk_nr));
+		if (hash == be32toh(leaf[i].hash)) {
+			chunk = map_chunk(db, be32toh(leaf[i].chunk_nr));
 			if (IS_ERR(chunk))
 				goto out;
 			if (verify_chunk(chunk, digest))

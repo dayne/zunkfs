@@ -16,7 +16,6 @@
 
 #include "utils.h"
 #include "zunkfs.h"
-#include "mutex.h"
 #include "chunk-db.h"
 #include "byteorder.h"
 
@@ -34,26 +33,20 @@
 * to hash collisions. This is dealt with by allowing the same hash to
 * appear multiple times in a leaf. Collisions are resolved at lookup.
 *
-* The first MAX_INDEX chunks are reserved for leaf index chunks. (512MB)
+* The first MAX_INDEX + 1chunks are reserved for leaf index chunks. (~512MB)
 * Scan through these chunks to build the root node.
 */
 
 struct index {
 	be32_t hash;
 	be32_t chunk_nr;
-}__attribute__((packed));
-
-struct root_index {
-	uint32_t hash;
-	uint32_t chunk_nr;
-};
+} __attribute__((packed));
 
 struct db {
-	struct root_index root[MAX_INDEX];
+	struct index *root;
 	int fd;
 	uint32_t next_nr;
 	unsigned ro:1;
-	struct mutex mutex;
 };
 
 static inline unsigned char *__map_chunk(struct db *db, uint32_t nr,
@@ -79,7 +72,7 @@ static inline void *map_chunk(struct db *db, uint32_t nr)
 	void *chunk;
 
 	if (nr >= db->next_nr)
-		return ERR_PTR(EINVAL);
+		return ERR_PTR(ERANGE);
 
 	chunk = __map_chunk(db, nr, MAP_NOCACHE|MAP_POPULATE);
 #if MAP_POPULATE == 0
@@ -95,64 +88,46 @@ static inline void unmap_chunk(void *chunk)
 	assert(error == 0);
 }
 
-/* used for sorting entries in the root index */
-static int compar_root_index(const void *a, const void *b)
+static int load_root(struct db *db)
 {
-	const struct root_index *i = a, *j = b;
-	assert(i->hash != j->hash);
-	return i->hash < j->hash ? -1 : 1;
-}
-
-/*
-* Only the leaf index nodes are store on disk. The root is generated
-* at load time. The first entry in the root is special, in that
-* it's hash is actually the # of leafs in the root, and the chunk_nr
-* is *ALWAYS* 0. 
-*/
-static int build_root(struct db *db)
-{
-	struct index idx;
-	uint32_t i;
-
-	for (i = 1; i < MAX_INDEX; i ++) {
-		ssize_t n = pread(db->fd, &idx, sizeof(struct index),
-				(off_t)i * CHUNK_SIZE);
-		if (n < 0)
-			return -errno;
-		assert(n == sizeof(struct index));
-		if (be32toh(idx.chunk_nr) == INVALID_CHUNK_NR)
-			break;
-		db->root[i].hash = be32toh(idx.hash);
-		db->root[i].chunk_nr = i;
+	if (db->next_nr > MAX_INDEX) {
+		db->root = map_chunk(db, 0);
+		if (!IS_ERR(db->root))
+			return 0;
+		return -PTR_ERR(db->root);
 	}
 
-	/*
-	 * entries on disk are not sorted
-	 */
-	qsort(db->root + 1, i - 1, sizeof(struct index), compar_root_index);
+	if (ftruncate(db->fd, CHUNK_SIZE * (MAX_INDEX + 1)))
+		return -errno;
 
-	db->root[0].hash = i;
-	db->root[0].chunk_nr = 0;
+	db->next_nr = MAX_INDEX + 1;
+
+	db->root = map_chunk(db, 0);
+	if (IS_ERR(db->root))
+		return -PTR_ERR(db->root);
+
+	db->root[0].hash = htobe32(1);
+	db->root[0].chunk_nr = htobe32(1);
 
 	return 0;
 }
 
 static int hash_insert(struct db *db, uint32_t hash, uint32_t chunk_nr)
 {
-	struct root_index *root = db->root;
+	struct index *root = db->root;
 	struct index *leaf;
 	struct index *split;
 	int i, split_at, leaf_nr;
 
 	/* XXX: this may need to become a binary search */
-	for (leaf_nr = 1; leaf_nr < root[0].hash; leaf_nr ++)
-		if (hash < root[leaf_nr].hash)
+	for (leaf_nr = 1; leaf_nr < be32toh(root[0].hash); leaf_nr ++)
+		if (hash < be32toh(root[leaf_nr].hash))
 			break;
 
-	if (root[0].hash == MAX_INDEX)
+	if (be32toh(root[0].hash) == MAX_INDEX)
 		return -ENOSPC;
 
-	leaf = map_chunk(db, root[leaf_nr - 1].chunk_nr);
+	leaf = map_chunk(db, be32toh(root[leaf_nr - 1].chunk_nr));
 	if (IS_ERR(leaf))
 		return -PTR_ERR(leaf);
 
@@ -188,7 +163,7 @@ split_leaf:
 	unmap_chunk(leaf);
 	return -ENOSPC;
 split_here:
-	split = map_chunk(db, root[0].hash);
+	split = map_chunk(db, be32toh(root[0].hash));
 	if (IS_ERR(split)) {
 		unmap_chunk(leaf);
 		return -PTR_ERR(split);
@@ -198,12 +173,12 @@ split_here:
 	memset(leaf + split_at, 0, sizeof(*leaf) * (MAX_INDEX - split_at));
 
 	memmove(root + leaf_nr + 1, root + leaf_nr, sizeof(*root) *
-			(root[0].hash - leaf_nr));
+			(be32toh(root[0].hash) - leaf_nr));
 
-	root[leaf_nr].hash = be32toh(split[0].hash);
+	root[leaf_nr].hash = split[0].hash;
 	root[leaf_nr].chunk_nr = root[0].hash;
 
-	root[0].hash ++;
+	root[0].hash = htobe32(be32toh(root[0].hash) + 1);
 
 	if (i > split_at) {
 		unmap_chunk(leaf);
@@ -217,18 +192,22 @@ split_here:
 
 unsigned char *lookup_chunk(struct db *db, const unsigned char *digest)
 {
-	struct root_index *root = db->root;
+	struct index *root = db->root;
 	struct index *leaf;
 	uint32_t hash = *(uint32_t *)digest;
 	int i, leaf_nr;
 	unsigned char *chunk;
 
 	/* XXX: this may need to become a binary search */
-	for (leaf_nr = 1; leaf_nr < root[0].hash; leaf_nr ++)
-		if (hash < root[leaf_nr].hash)
+	for (leaf_nr = 1; leaf_nr < be32toh(root[0].hash); leaf_nr ++)
+		if (hash < be32toh(root[leaf_nr].hash))
 			break;
 
-	leaf = map_chunk(db, root[leaf_nr - 1].chunk_nr);
+	TRACE("leaf_nr=%d chunk_nr=%u hash=%x\n", leaf_nr,
+			be32toh(root[leaf_nr-1].chunk_nr),
+			be32toh(root[leaf_nr-1].hash));
+
+	leaf = map_chunk(db, be32toh(root[leaf_nr - 1].chunk_nr));
 	if (IS_ERR(leaf))
 		return (void *)leaf;
 
@@ -259,7 +238,8 @@ static int file_read_chunk(unsigned char *chunk, const unsigned char *digest,
 	unsigned char *db_chunk;
 	int error;
 
-	lock(&db->mutex);
+	flock(db->fd, LOCK_SH);
+
 	db_chunk = lookup_chunk(db, digest);
 	if (!db_chunk)
 		error = -ENOENT;
@@ -270,7 +250,8 @@ static int file_read_chunk(unsigned char *chunk, const unsigned char *digest,
 		unmap_chunk(db_chunk);
 		error = CHUNK_SIZE;
 	}
-	unlock(&db->mutex);
+
+	flock(db->fd, LOCK_UN);
 
 	return error;
 }
@@ -282,7 +263,8 @@ static int file_write_chunk(const unsigned char *chunk,
 	unsigned char *db_chunk;
 	int error = CHUNK_SIZE;
 
-	lock(&db->mutex);
+	flock(db->fd, LOCK_EX);
+
 	db_chunk = lookup_chunk(db, digest);
 	if (db_chunk) {
 		if (IS_ERR(db_chunk))
@@ -313,10 +295,10 @@ static int file_write_chunk(const unsigned char *chunk,
 	db->next_nr ++;
 out:
 	unmap_chunk(db_chunk);
-	unlock(&db->mutex);
+	flock(db->fd, LOCK_UN);
 	return error;
 db_chunk_error:
-	unlock(&db->mutex);
+	flock(db->fd, LOCK_UN);
 	return -PTR_ERR(db_chunk);
 }
 
@@ -327,8 +309,6 @@ static int file_chunkdb_ctor(const char *spec, struct chunk_db *chunk_db)
 	struct stat st;
 	int error;
 
-	init_mutex(&db->mutex);
-
 	db->ro = (chunk_db->mode == CHUNKDB_RO);
 	db->fd = open(path, db->ro ? O_RDONLY : O_RDWR|O_CREAT, 0644);
 	if (db->fd < 0)
@@ -338,13 +318,8 @@ static int file_chunkdb_ctor(const char *spec, struct chunk_db *chunk_db)
 		goto set_error;
 
 	db->next_nr = st.st_size / CHUNK_SIZE;
-	if (db->next_nr < MAX_INDEX) {
-		if (ftruncate(db->fd, CHUNK_SIZE * MAX_INDEX))
-			goto set_error;
-		db->next_nr = MAX_INDEX;
-	}
 
-	error = build_root(db);
+	error = load_root(db);
 	if (error)
 		goto error;
 

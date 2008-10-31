@@ -217,7 +217,7 @@ unsigned char *lookup_chunk(struct db *db, const unsigned char *digest)
 
 	/* XXX: this may need to become a binary search */
 	for (leaf_nr = 1; leaf_nr < root[0].hash; leaf_nr ++)
-		if (hash < root[i].hash)
+		if (hash < root[leaf_nr].hash)
 			break;
 
 	leaf = map_chunk(db, root[leaf_nr - 1].chunk_nr);

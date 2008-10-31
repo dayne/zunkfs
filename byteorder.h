@@ -51,10 +51,10 @@ typedef struct { uint64_t v; } be64_t;
 #if BYTE_ORDER == LITTLE_ENDIAN
 static inline le16_t htole16(uint16_t x) { return (le16_t){ x }; }
 static inline be16_t htobe16(uint16_t x) { return (be16_t){ bswap16(x) }; }
-static inline le32_t htole32(uint16_t x) { return (le32_t){ x }; }
-static inline be32_t htobe32(uint16_t x) { return (be32_t){ bswap32(x) }; }
-static inline le64_t htole64(uint16_t x) { return (le64_t){ x }; }
-static inline be64_t htobe64(uint16_t x) { return (be64_t){ bswap64(x) }; }
+static inline le32_t htole32(uint32_t x) { return (le32_t){ x }; }
+static inline be32_t htobe32(uint32_t x) { return (be32_t){ bswap32(x) }; }
+static inline le64_t htole64(uint64_t x) { return (le64_t){ x }; }
+static inline be64_t htobe64(uint64_t x) { return (be64_t){ bswap64(x) }; }
 static inline uint16_t le16toh(le16_t x) { return x.v; }
 static inline uint16_t be16toh(be16_t x) { return bswap16(x.v); }
 static inline uint32_t le32toh(le32_t x) { return x.v; }
@@ -64,10 +64,10 @@ static inline uint64_t be64toh(be64_t x) { return bswap64(x.v); }
 #else
 static inline le16_t htole16(uint16_t x) { return (le16_t){ bswap16(x) }; }
 static inline be16_t htobe16(uint16_t x) { return (be16_t){ x }; }
-static inline le32_t htole32(uint16_t x) { return (le32_t){ bswap32(x) }; }
-static inline be32_t htobe32(uint16_t x) { return (be32_t){ x }; }
-static inline le64_t htole64(uint16_t x) { return (le64_t){ bswap64(x) }; }
-static inline be64_t htobe64(uint16_t x) { return (be64_t){ x }; }
+static inline le32_t htole32(uint32_t x) { return (le32_t){ bswap32(x) }; }
+static inline be32_t htobe32(uint32_t x) { return (be32_t){ x }; }
+static inline le64_t htole64(uint64_t x) { return (le64_t){ bswap64(x) }; }
+static inline be64_t htobe64(uint64_t x) { return (be64_t){ x }; }
 static inline uint16_t le16toh(le16_t x) { return bswap16(x.v); }
 static inline uint16_t be16toh(be16_t x) { return x.v; }
 static inline uint32_t le32toh(le32_t x) { return bswap32(x.v); }

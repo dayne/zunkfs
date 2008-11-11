@@ -180,12 +180,28 @@ int init_disk_dentry(struct disk_dentry *ddent)
 	return err;
 }
 
-static inline unsigned dentry_chunk_count(struct dentry *dentry)
+static inline unsigned __dentry_chunk_count(const struct dentry *dentry)
 {
 	if (S_ISREG(dentry->mode))
 		return (dentry->size + CHUNK_SIZE - 1) / CHUNK_SIZE;
 	assert(S_ISDIR(dentry->mode));
 	return (dentry->size + DIRENTS_PER_CHUNK - 1) / DIRENTS_PER_CHUNK;
+}
+
+unsigned dentry_chunk_count(const struct dentry *dentry)
+{
+	unsigned long chunks;
+	unsigned long total;
+
+	chunks = __dentry_chunk_count(dentry);
+	total = 0;
+
+	while (chunks) {
+		total += chunks;
+		chunks /= DIGESTS_PER_CHUNK;
+	}
+
+	return total + 1; /* account for secret chunk */
 }
 
 struct chunk_node *get_dentry_chunk(struct dentry *dentry, unsigned chunk_nr)
@@ -206,7 +222,7 @@ struct chunk_node *get_dentry_chunk(struct dentry *dentry, unsigned chunk_nr)
 		if (err < 0)
 			return ERR_PTR(-err);
 		err = init_chunk_tree(&dentry->chunk_tree,
-				dentry_chunk_count(dentry),
+				__dentry_chunk_count(dentry),
 				dentry->ddent->digest, &dentry_ctree_ops);
 		if (err < 0)
 			return ERR_PTR(-err);

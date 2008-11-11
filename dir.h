@@ -121,5 +121,7 @@ int scan_dir(struct dentry *dentry, int (*func)(struct dentry *, void *),
 
 int dup_disk_dentry(struct dentry *parent, const struct disk_dentry *src);
 
+unsigned dentry_chunk_count(const struct dentry *dentry);
+
 #endif
 

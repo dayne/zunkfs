@@ -41,18 +41,15 @@ static int zunkfs_calc_size(struct dentry *dentry, void *data)
 {
 	struct statvfs *stbuf = data;
 
-	/*
-	 * each dentry uses at least 2 chunks.
-	 */
-	stbuf->f_blocks += 2 * CHUNK_BLOCKS;
+	if (S_ISREG(dentry->mode))
+		stbuf->f_files ++;
 
-	if (S_ISDIR(dentry->mode))
-		return scan_dir(dentry, zunkfs_calc_size, data);
+	stbuf->f_blocks += (uint64_t)dentry_chunk_count(dentry) * CHUNK_BLOCKS;
 
-	stbuf->f_files ++;
-	stbuf->f_blocks += (dentry->size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+	if (S_ISREG(dentry->mode))
+		return 0;
 
-	return 0;
+	return scan_dir(dentry, zunkfs_calc_size, data);
 }
 
 static int zunkfs_statfs(const char *path, struct statvfs *stbuf)

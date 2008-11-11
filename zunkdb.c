@@ -16,6 +16,7 @@
 #include <unistd.h>
 #include <getopt.h>
 #include <libgen.h>
+#include <signal.h>
 
 #include <event.h>
 #include <evdns.h>

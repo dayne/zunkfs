@@ -29,6 +29,70 @@
 #include "dir.h"
 #include "file.h"
 
+#ifndef BLOCK_SIZE
+#define BLOCK_SIZE 512
+#endif
+
+#ifndef CHUNK_BLOCKS
+#define CHUNK_BLOCKS (CHUNK_SIZE / BLOCK_SIZE)
+#endif
+
+static int zunkfs_calc_size(struct dentry *dentry, void *data)
+{
+	struct statvfs *stbuf = data;
+
+	/*
+	 * each dentry uses at least 2 chunks.
+	 */
+	stbuf->f_blocks += 2 * CHUNK_BLOCKS;
+
+	if (S_ISDIR(dentry->mode))
+		return scan_dir(dentry, zunkfs_calc_size, data);
+
+	stbuf->f_files ++;
+	stbuf->f_blocks += (dentry->size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+
+	return 0;
+}
+
+static int zunkfs_statfs(const char *path, struct statvfs *stbuf)
+{
+	struct dentry *dentry;
+	int error;
+
+	TRACE("%s\n", path);
+
+	/*
+	 * This is a bit painful, as there's no size information
+	 * in the root dentry, nor is there a superblock to record
+	 * total size. So instead, we need to iterate the entire FS
+	 * and calculate the size of each dentry.
+	 */
+
+	dentry = find_dentry(path, NULL);
+	if (IS_ERR(dentry))
+		return -PTR_ERR(dentry);
+	if (!S_ISDIR(dentry->mode)) {
+		put_dentry(dentry);
+		return -ENOTDIR;
+	}
+	
+	memset(stbuf, 0, sizeof(struct statvfs));
+
+	stbuf->f_bsize = BLOCK_SIZE;
+	stbuf->f_blocks = 2 * CHUNK_BLOCKS; /* root's data & secret chunks */
+	stbuf->f_bfree = ~0UL;
+	stbuf->f_bavail = ~0UL;
+	stbuf->f_files = 0;
+	stbuf->f_ffree = ~0UL;
+	stbuf->f_namemax = DDENT_NAME_MAX;
+
+	error = scan_dir(dentry, zunkfs_calc_size, stbuf);
+	put_dentry(dentry);
+
+	return error;
+}
+
 static int zunkfs_getattr(const char *path, struct stat *stbuf)
 {
 	struct dentry *dentry;
@@ -343,6 +407,7 @@ static int zunkfs_chmod(const char *path, mode_t mode)
 }
 
 static struct fuse_operations zunkfs_operations = {
+	.statfs		= zunkfs_statfs,
 	.getattr	= zunkfs_getattr,
 	.readdir	= zunkfs_readdir,
 	.open		= zunkfs_open,

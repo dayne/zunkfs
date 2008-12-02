@@ -13,7 +13,6 @@
 #include <sys/mman.h>
 #include <sys/file.h>
 #include <openssl/sha.h>
-#include <arpa/inet.h> // ntohl and htonl
 
 #include "utils.h"
 #include "zunkfs.h"
@@ -331,6 +330,10 @@ static char *file_chunkdb_ctor(const char *spec, struct chunk_db *chunk_db)
 
 	if (fstat(db->fd, &st))
 		goto set_error;
+
+	error = -EINVAL;
+	if (!S_ISREG(st.st_mode))
+		goto error;
 
 	db->next_nr = st.st_size / CHUNK_SIZE;
 

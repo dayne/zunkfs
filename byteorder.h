@@ -46,6 +46,22 @@ typedef struct { uint64_t v; } le64_t;
 typedef struct { uint64_t v; } be64_t;
 
 /*
+ * Newer Linux and BSD may already define htole* and htobe* as macros.
+ */
+#undef htole16
+#undef htole32
+#undef htole64
+#undef htobe16
+#undef htobe32
+#undef htobe64
+#undef le16toh
+#undef le32toh
+#undef le64toh
+#undef be16toh
+#undef be32toh
+#undef be64toh
+
+/*
  * BSD style, but type-safe, conversions... 
  */
 #if BYTE_ORDER == LITTLE_ENDIAN

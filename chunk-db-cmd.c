@@ -18,7 +18,7 @@
 
 typedef ssize_t (*xfer_fn)(int fd, void *buf, size_t len);
 
-static int xfer_chunk(unsigned char *chunk, const unsigned char *digest,
+static bool xfer_chunk(unsigned char *chunk, const unsigned char *digest,
 		xfer_fn op, int orig_fd, void *db_info)
 {
 	const char *fetch_cmd = db_info;
@@ -38,7 +38,7 @@ static int xfer_chunk(unsigned char *chunk, const unsigned char *digest,
 	err = pipe(fd);
 	if (err) {
 		ERROR("pipe: %s\n", strerror(errno));
-		return -EIO;
+		return FALSE;
 	}
 
 	pid = fork();
@@ -46,7 +46,7 @@ static int xfer_chunk(unsigned char *chunk, const unsigned char *digest,
 		ERROR("fork: %s\n", strerror(errno));
 		close(fd[0]);
 		close(fd[1]);
-		return -EIO;
+		return FALSE;
 	}
 
 	if (pid) {
@@ -63,7 +63,7 @@ static int xfer_chunk(unsigned char *chunk, const unsigned char *digest,
 				close(fd[1]);
 				kill(pid, 9);
 				waitpid(pid, NULL, 0);
-				return -EIO;
+				return FALSE;
 			}
 			if (!n)
 				break;
@@ -80,7 +80,7 @@ static int xfer_chunk(unsigned char *chunk, const unsigned char *digest,
 
 		TRACE("len=%d", len);
 
-		return len;
+		return TRUE;
 	}
 
 	close(fd[0]);
@@ -106,31 +106,30 @@ static int xfer_chunk(unsigned char *chunk, const unsigned char *digest,
 	return 0;
 }
 
-static int cmd_read_chunk(unsigned char *chunk, const unsigned char *digest,
+static bool cmd_read_chunk(unsigned char *chunk, const unsigned char *digest,
 		void *db_info)
 {
 	return xfer_chunk(chunk, digest, (xfer_fn)read, STDOUT_FILENO, db_info);
 }
 
-static int cmd_write_chunk(const unsigned char *chunk,
+static bool cmd_write_chunk(const unsigned char *chunk,
 		const unsigned char *digest, void *db_info)
 {
 	return xfer_chunk((unsigned char *)chunk, digest, 
 			(xfer_fn)write, STDIN_FILENO, db_info);
 }
 
-static int cmd_chunkdb_ctor(const char *spec, struct chunk_db *cdb)
+static char *cmd_chunkdb_ctor(const char *spec, struct chunk_db *cdb)
 {
 	TRACE("mode=0x%x spec=%s\n", cdb->mode, spec);
 
 	if (access(spec, X_OK)) {
-		WARNING("%s is not executable: %s\n", spec, strerror(errno));
-		return -errno;
+		return sprintf_new("%s is not executable: %s\n", spec,
+				strerror(errno));
 	}
 
 	cdb->db_info = (void *)spec;
-
-	return 0;
+	return NULL;
 }
 
 static struct chunk_db_type cmd_chunkdb_type = {

@@ -33,6 +33,7 @@ int main(int argc, char **argv)
 	struct disk_dentry root_ddent;
 	struct timeval now;
 	DECLARE_MUTEX(root_mutex);
+	char *errstr;
 	int err;
 
 	fprintf(stderr, "DIRENTS_PER_CHUNK=%lu\n",
@@ -42,9 +43,9 @@ int main(int argc, char **argv)
 	if (err)
 		panic("set_logging: %s\n", strerror(-err));
 
-	err = add_chunkdb("rw,mem:");
-	if (err)
-		panic("add_chunkdb: %s\n", strerror(-err));
+	errstr = add_chunkdb("rw,mem:");
+	if (errstr)
+		panic("add_chunkdb: %s\n", STR_OR_ERROR(errstr));
 
 	err = init_disk_dentry(&root_ddent);
 	if (err < 0)

@@ -35,13 +35,13 @@ static inline struct list_head *cache_bucket(struct cache *cache,
 		(*(unsigned long *)digest & cache->hash_mask);
 }
 
-static int mem_read_chunk(unsigned char *chunk, const unsigned char *digest,
+static bool mem_read_chunk(unsigned char *chunk, const unsigned char *digest,
 		void *db_info)
 {
 	struct cache *cache = db_info;
 	struct chunk *cp;
 	struct list_head *bucket;
-	int ret = 0;
+	bool status = FALSE;
 
 	lock(&cache->mutex);
 
@@ -51,23 +51,23 @@ static int mem_read_chunk(unsigned char *chunk, const unsigned char *digest,
 		if (!memcmp(digest, cp->digest, CHUNK_DIGEST_LEN)) {
 			memcpy(chunk, cp->data, CHUNK_SIZE);
 			list_move(&cp->lru_entry, &cache->chunk_lru);
-			ret = CHUNK_SIZE;
+			status = TRUE;
 			break;
 		}
 	}
 
 	unlock(&cache->mutex);
 
-	return ret;
+	return status;
 }
 
-static int mem_write_chunk(const unsigned char *chunk,
+static bool mem_write_chunk(const unsigned char *chunk,
 		const unsigned char *digest, void *db_info)
 {
 	struct cache *cache = db_info;
 	struct list_head *bucket;
 	struct chunk *cp;
-	int ret = 0;
+	bool status = FALSE;
 
 	lock(&cache->mutex);
 
@@ -80,7 +80,6 @@ static int mem_write_chunk(const unsigned char *chunk,
 		}
 	}
 
-	ret = -ENOMEM;
 	cp = malloc(sizeof(struct chunk));
 	if (!cp)
 		goto out;
@@ -101,19 +100,19 @@ static int mem_write_chunk(const unsigned char *chunk,
 	}
 
 found:
-	ret = CHUNK_SIZE;
+	status = TRUE;
 out:
 	unlock(&cache->mutex);
-	return ret;
+	return status;
 }
 
-static int mem_chunkdb_ctor(const char *spec, struct chunk_db *chunk_db)
+static char *mem_chunkdb_ctor(const char *spec, struct chunk_db *chunk_db)
 {
 	struct cache *cache = chunk_db->db_info;
 	unsigned i;
 
 	if (!(chunk_db->mode & CHUNKDB_RW))
-		return -EINVAL;
+		return sprintf_new("Memory cache has to be writable.\n");
 
 	list_head_init(&cache->chunk_lru);
 	init_mutex(&cache->mutex);
@@ -137,14 +136,14 @@ static int mem_chunkdb_ctor(const char *spec, struct chunk_db *chunk_db)
 	cache->chunk_table = malloc((cache->hash_mask + 1) * 
 			sizeof(struct list_head));
 	if (!cache->chunk_table)
-		return -ENOMEM;
+		return ERR_PTR(ENOMEM);
 
 	for (i = 0; i <= cache->hash_mask; i ++)
 		list_head_init(&cache->chunk_table[i]);
 
 	TRACE("hash_mask=0x%x (%d buckets)\n", cache->hash_mask, i);
 
-	return 0;
+	return NULL;
 }
 
 static struct chunk_db_type mem_chunkdb_type = {

@@ -11,6 +11,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/mman.h>
+#include <sys/file.h>
 #include <openssl/sha.h>
 #include <arpa/inet.h> // ntohl and htonl
 
@@ -231,44 +232,50 @@ out:
 	return chunk;
 }
 
-static int file_read_chunk(unsigned char *chunk, const unsigned char *digest,
+static bool file_read_chunk(unsigned char *chunk, const unsigned char *digest,
 		void *db_info)
 {
 	struct db *db = db_info;
 	unsigned char *db_chunk;
-	int error;
+	bool status = FALSE;
 
 	flock(db->fd, LOCK_SH);
 
 	db_chunk = lookup_chunk(db, digest);
-	if (!db_chunk)
-		error = -ENOENT;
-	else if (IS_ERR(db_chunk))
-		error = -PTR_ERR(db_chunk);
-	else {
-		memcpy(chunk, db_chunk, CHUNK_SIZE);
-		unmap_chunk(db_chunk);
-		error = CHUNK_SIZE;
+	if (db_chunk) {
+		if (IS_ERR(db_chunk)) {
+			TRACE("digest=%s: %s\n",
+					digest_string(digest), 
+					strerror(PTR_ERR(db_chunk)));
+		} else {
+			status = TRUE;
+			memcpy(chunk, db_chunk, CHUNK_SIZE);
+			unmap_chunk(db_chunk);
+		}
 	}
-
 	flock(db->fd, LOCK_UN);
 
-	return error;
+	return status;
 }
 
-static int file_write_chunk(const unsigned char *chunk,
+static bool file_write_chunk(const unsigned char *chunk,
 		const unsigned char *digest, void *db_info)
 {
 	struct db *db = db_info;
 	unsigned char *db_chunk;
-	int error = CHUNK_SIZE;
+	bool status = FALSE;
+	int error;
 
 	flock(db->fd, LOCK_EX);
 
 	db_chunk = lookup_chunk(db, digest);
 	if (db_chunk) {
-		if (IS_ERR(db_chunk))
-			goto db_chunk_error;
+		if (IS_ERR(db_chunk)) {
+			TRACE("lookup_chunk(%s): %s\n", 
+					digest_string(digest),
+					strerror(PTR_ERR(db_chunk)));
+		} else
+			status = TRUE;
 		goto out;
 	}
 
@@ -277,32 +284,37 @@ static int file_write_chunk(const unsigned char *chunk,
 	 * any access to the chunk will cause a SIGBUS. 
 	 */
 	if (ftruncate(db->fd, ((off_t)db->next_nr + 1) * CHUNK_SIZE)) {
-		error = -errno;
+		TRACE("ftruncate(%u * CHUNK_SIZE): %s\n",
+				db->next_nr + 1,
+				strerror(errno));
 		goto out;
 	}
 
 	db_chunk = __map_chunk(db, db->next_nr, 0);
-	if (IS_ERR(db_chunk))
-		goto db_chunk_error;
+	if (IS_ERR(db_chunk)) {
+		TRACE("__map_chunk(%u): %s\n", db->next_nr,
+				strerror(PTR_ERR(db_chunk)));
+		goto out;
+	}
 
 	memcpy(db_chunk, chunk, CHUNK_SIZE);
 
 	error = hash_insert(db, *(uint32_t *)digest, db->next_nr);
-	if (error)
+	if (error) {
+		TRACE("hash_insert(0x%x, %u): %s\n", *(uint32_t *)digest,
+				db->next_nr, strerror(-error));
 		goto out;
+	}
 
-	error = CHUNK_SIZE;
+	status = TRUE;
 	db->next_nr ++;
 out:
 	unmap_chunk(db_chunk);
 	flock(db->fd, LOCK_UN);
-	return error;
-db_chunk_error:
-	flock(db->fd, LOCK_UN);
-	return -PTR_ERR(db_chunk);
+	return status;
 }
 
-static int file_chunkdb_ctor(const char *spec, struct chunk_db *chunk_db)
+static char *file_chunkdb_ctor(const char *spec, struct chunk_db *chunk_db)
 {
 	const char *path = spec;
 	struct db *db = chunk_db->db_info;
@@ -310,9 +322,12 @@ static int file_chunkdb_ctor(const char *spec, struct chunk_db *chunk_db)
 	int error;
 
 	db->ro = (chunk_db->mode == CHUNKDB_RO);
+
 	db->fd = open(path, db->ro ? O_RDONLY : O_RDWR|O_CREAT, 0644);
-	if (db->fd < 0)
-		return -errno;
+	if (db->fd < 0) {
+		return sprintf_new("Can't open %s: %s\n", path, 
+				strerror(errno));
+	}
 
 	if (fstat(db->fd, &st))
 		goto set_error;
@@ -328,12 +343,13 @@ static int file_chunkdb_ctor(const char *spec, struct chunk_db *chunk_db)
 	 */
 	posix_fadvise(db->fd, 0, 0, POSIX_FADV_RANDOM);
 
-	return 0;
+	return NULL;
 set_error:
 	error = -errno;
 error:
 	close(db->fd);
-	return error;
+	return sprintf_new("Error loading database file %s: %s\n", path,
+			strerror(-error));
 }
 
 static struct chunk_db_type file_chunkdb_type = {

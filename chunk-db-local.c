@@ -15,16 +15,17 @@
 #include "chunk-db.h"
 #include "utils.h"
 
-static int local_read_chunk(unsigned char *chunk, const unsigned char *digest,
+static bool local_read_chunk(unsigned char *chunk, const unsigned char *digest,
 		void *db_info)
 {
 	char *chunk_dir = db_info;
-	int err, fd, len, n;
+	int fd, len, n;
 	char *path;
+	int err;
 
 	err = asprintf(&path, "%s/%s", chunk_dir, digest_string(digest));
 	if (err < 0)
-		return -errno;
+		return FALSE;
 
 	TRACE("path=%s\n", path);
 
@@ -32,7 +33,7 @@ static int local_read_chunk(unsigned char *chunk, const unsigned char *digest,
 	if (fd < 0) {
 		WARNING("%s: %s\n", path, strerror(errno));
 		free(path);
-		return -EIO;
+		return FALSE;
 	}
 	free(path);
 
@@ -42,28 +43,28 @@ static int local_read_chunk(unsigned char *chunk, const unsigned char *digest,
 		if (n < 0) {
 			if (errno == EINTR)
 				continue;
-			err = -errno;
 			WARNING("read %s: %s\n", path, strerror(errno));
 			close(fd);
-			return err;
+			return FALSE;
 		}
 		len += n;
 	}
 	close(fd);
 
-	return CHUNK_SIZE;
+	return TRUE;
 }
 
-static int local_write_chunk(const unsigned char *chunk, 
+static bool local_write_chunk(const unsigned char *chunk, 
 		const unsigned char *digest, void *db_info)
 {
 	char *chunk_dir = db_info;
-	int err, fd, len, n;
+	int fd, len, n;
 	char *path;
+	int err;
 
 	err = asprintf(&path, "%s/%s", chunk_dir, digest_string(digest));
 	if (err < 0)
-		return -errno;
+		return FALSE;
 
 	TRACE("path=%s\n", path);
 
@@ -71,7 +72,7 @@ static int local_write_chunk(const unsigned char *chunk,
 	if (fd < 0) {
 		WARNING("%s: %s\n", path, strerror(errno));
 		free(path);
-		return -EIO;
+		return FALSE;
 	}
 	free(path);
 
@@ -81,21 +82,20 @@ static int local_write_chunk(const unsigned char *chunk,
 		if (n < 0) {
 			if (errno == EINTR)
 				continue;
-			err = -errno;
 			WARNING("%s: %s\n", path, strerror(errno));
 			close(fd);
-			return err;
+			return FALSE;
 		}
 		len += n;
 	}
 	err = close(fd);
 	if (err)
-		return -errno;
+		return FALSE;
 
-	return CHUNK_SIZE;
+	return TRUE;
 }
 
-static int local_chunkdb_ctor(const char *spec, struct chunk_db *cdb)
+static char *local_chunkdb_ctor(const char *spec, struct chunk_db *cdb)
 {
 	struct stat stbuf;
 	int err;
@@ -104,15 +104,17 @@ static int local_chunkdb_ctor(const char *spec, struct chunk_db *cdb)
 
 	err = stat(spec, &stbuf);
 	if (err == -1)
-		return -errno;
+		return sprintf_new("Can't stat %s: %s\n", spec,
+				strerror(errno));
 	if (!S_ISDIR(stbuf.st_mode))
-		return -ENOTDIR;
+		return sprintf_new("%s is not a directory.\n", spec);
 	if (access(spec, R_OK | ((cdb->mode & CHUNKDB_RW) ? W_OK : 0)))
-		return errno;
+		return sprintf_new("Can't access %s: %s\n", spec,
+				strerror(errno));
 
 	cdb->db_info = (void *)spec;
 
-	return 0;
+	return NULL;
 }
 
 static struct chunk_db_type local_chunkdb_type = {

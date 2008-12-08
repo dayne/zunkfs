@@ -60,6 +60,7 @@ static void usage(int exit_code)
 
 static int proc_opt(int opt, char *arg)
 {
+	char *errstr;
 	int err;
 
 	switch(opt) {
@@ -82,10 +83,10 @@ static int proc_opt(int opt, char *arg)
 		return 0;
 
 	case OPT_DB:
-		err = add_chunkdb(arg);
-		if (err) {
+		errstr = add_chunkdb(arg);
+		if (errstr) {
 			fprintf(stderr, "Failed to add chunk-db %s: %s\n",
-					optarg, strerror(-err));
+					optarg, STR_OR_ERROR(errstr));
 			return err;
 		}
 		nr_dbs ++;

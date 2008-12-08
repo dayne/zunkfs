@@ -165,15 +165,16 @@ int main(int argc, char **argv)
 {
 	struct disk_dentry root_ddent;
 	DECLARE_MUTEX(root_mutex);
+	char *errstr;
 	int i, err;
 
 	err = set_logging("T,stdout");
 	if (err)
 		panic("set_logging: %s\n", strerror(-err));
 
-	err = add_chunkdb("rw,mem:");
-	if (err)
-		panic("add_chunkdb: %s\n", strerror(-err));
+	errstr = add_chunkdb("rw,mem:");
+	if (errstr)
+		panic("add_chunkdb: %s\n", STR_OR_ERROR(errstr));
 
 	err = init_disk_dentry(&root_ddent);
 	if (err < 0)

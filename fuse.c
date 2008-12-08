@@ -516,6 +516,7 @@ static int opt_proc(void *data, const char *arg, int key,
 		struct fuse_args *args)
 {
 	static unsigned root_set = 0;
+	char *errstr;
 	int err;
 
 	switch(key) {
@@ -534,14 +535,10 @@ static int opt_proc(void *data, const char *arg, int key,
 		return 0;
 	case OPT_CHUNK_DB:
 		arg += 11;
-		switch((err = add_chunkdb(arg))) {
-		case -EINVAL:
-			return -1;
-		case 0:
-			break;
-		default:
+		errstr = add_chunkdb(arg);
+		if (errstr) {
 			fprintf(stderr, "Failed to add chunkdb %s: %s\n", arg,
-					strerror(-err));
+					STR_OR_ERROR(errstr));
 			return -1;
 		}
 		return 0;

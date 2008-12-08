@@ -26,7 +26,7 @@ struct db_info {
 #define lock_db(db) lock(&(db)->mutex)
 #define unlock_db(db) unlock(&(db)->mutex)
 
-static int write_chunk_sqlite(const unsigned char *chunk,
+static bool write_chunk_sqlite(const unsigned char *chunk,
 		const unsigned char *digest, void *db_info_ptr)
 {
 	static const char sql[] =
@@ -42,7 +42,7 @@ static int write_chunk_sqlite(const unsigned char *chunk,
 		ERROR("sqlite3_prepare failed: %s\n",
 				sqlite3_errmsg(db_info->db));
 		unlock_db(db_info);
-		return -EIO;
+		return FALSE;
 	}
 
 	sqlite3_bind_text(stmt, 1, digest_string(digest), -1, SQLITE_STATIC);
@@ -55,20 +55,21 @@ static int write_chunk_sqlite(const unsigned char *chunk,
 		ERROR("sqlite3_finalize failed: %s\n",
 				sqlite3_errmsg(db_info->db));
 		unlock_db(db_info);
-		return -EIO;
+		return FALSE;
 	}
 
 	unlock_db(db_info);
-	return CHUNK_SIZE;
+	return TRUE;
 }
 
-static int read_chunk_sqlite(unsigned char *chunk, const unsigned char *digest,
+static bool read_chunk_sqlite(unsigned char *chunk, const unsigned char *digest,
 		void *db_info_ptr)
 {
 	static const char sql[] = "SELECT data FROM chunk WHERE hash = ?";
 	struct db_info *db_info = db_info_ptr;
 	sqlite3_stmt *stmt;
-	int err, ret = -EIO;
+	int err;
+	bool status = FALSE;
 
 	lock_db(db_info);
 	err = sqlite3_prepare(db_info->db, sql, -1, &stmt, 0);
@@ -76,7 +77,7 @@ static int read_chunk_sqlite(unsigned char *chunk, const unsigned char *digest,
 		ERROR("sqlite3_prepare failed: %d\n",
 				sqlite3_errmsg(db_info->db));
 		unlock_db(db_info);
-		return -EIO;
+		return FALSE;
 	}
 
 	TRACE("%s\n", digest_string(digest));
@@ -93,16 +94,16 @@ static int read_chunk_sqlite(unsigned char *chunk, const unsigned char *digest,
 	} else {
 		TRACE("sqlite3 query got chunk.\n");
 		memcpy(chunk, sqlite3_column_blob(stmt, 0), CHUNK_SIZE);
-		ret = CHUNK_SIZE;
+		status = TRUE;
 	}
 
 	sqlite3_finalize(stmt);
 	unlock_db(db_info);
 
-	return ret;
+	return status;
 }
 
-static int sqlite_chunkdb_ctor(const char *spec, struct chunk_db *chunk_db)
+static char *sqlite_chunkdb_ctor(const char *spec, struct chunk_db *chunk_db)
 {
 	struct db_info *db_info = chunk_db->db_info;
 	int error;
@@ -111,10 +112,11 @@ static int sqlite_chunkdb_ctor(const char *spec, struct chunk_db *chunk_db)
 
 	error = sqlite3_open(spec, &db_info->db);
 	if (error != SQLITE_OK) {
-		fprintf(stderr, "Can't open SQLite database '%s': %s\n",
+		char *errstr = sprintf_new(
+				"Can't open SQLite database '%s': %s\n",
 				spec, sqlite3_errmsg(db_info->db));
 		sqlite3_close(db_info->db);
-		return -EINVAL;
+		return errstr;
 	}
 
 	return 0;

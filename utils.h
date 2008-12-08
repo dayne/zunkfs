@@ -103,11 +103,20 @@ static inline int IS_ERR(const void *ptr)
 	return ptr >= __errptr && ptr < __errptr + MAX_ERRNO;
 }
 
+#define STR_OR_ERROR(str) IS_ERR(str) ? strerror(PTR_ERR(str)) : str
+
 /*
  * Misc...
  */
 #define container_of(ptr, type, memb) \
 	((type *)((unsigned long)(ptr) - (unsigned long)&((type *)0)->memb))
+
+char *sprintf_new(const char *fmt, ...);
+
+#undef TRUE
+#undef FALSE
+
+typedef enum { FALSE, TRUE } bool;
 
 /*
  * Socket helpers

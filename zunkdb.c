@@ -913,6 +913,7 @@ static void usage(int exit_code)
 static int proc_opt(int opt, char *arg)
 {
 	struct sockaddr_in *sa;
+	char *errstr;
 	int err;
 
 	switch(opt) {
@@ -946,10 +947,10 @@ static int proc_opt(int opt, char *arg)
 		return 0;
 
 	case OPT_CHUNK_DB:
-		err = add_chunkdb(optarg);
-		if (err) {
+		errstr = add_chunkdb(optarg);
+		if (errstr) {
 			fprintf(stderr, "Failed to add chunk-db %s: %s\n",
-					optarg, strerror(-err));
+					optarg, STR_OR_ERROR(errstr));
 			return err;
 		}
 		nr_chunkdbs ++;

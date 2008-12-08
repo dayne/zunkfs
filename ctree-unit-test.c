@@ -65,14 +65,15 @@ int main(int argc, char **argv)
 	struct chunk_node *cnode[NR_NODES];
 	unsigned char root_digest[CHUNK_DIGEST_LEN];
 	int i, err;
+	char *errstr;
 
 	err = set_logging("T,stdout");
 	if (err)
 		panic("set_logging: %s\n", strerror(-err));
 
-	err = add_chunkdb("rw,mem:");
-	if (err)
-		panic("add_chunkdb: %s\n", strerror(-err));
+	errstr = add_chunkdb("rw,mem:");
+	if (errstr)
+		panic("add_chunkdb: %s\n", STR_OR_ERROR(errstr));
 
 	err = random_chunk_digest(rand_digest);
 	if (err < 0)

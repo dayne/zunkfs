@@ -120,7 +120,7 @@ static int query_map_sqlite3(struct db_info *db, const char *query,
 	return 1;
 }
 
-static int map_read_chunk(unsigned char *chunk, const unsigned char *digest,
+static bool map_read_chunk(unsigned char *chunk, const unsigned char *digest,
 		void *db_info)
 {
 	struct db_info *db = db_info;
@@ -130,17 +130,17 @@ static int map_read_chunk(unsigned char *chunk, const unsigned char *digest,
 
 	err = asprintf(&query, map_query, digest_string(digest));
 	if (err)
-		return -ENOMEM;
+		return FALSE;
 
 	err = -EIO;
 	if (db->query_map(db, query, &map))
 		err = read_chunk_from_file(map.path, map.chunk_nr, chunk);
 
 	free(query);
-	return err;
+	return err == 0;
 }
 
-static int map_chunkdb_ctor(const char *spec, struct chunk_db *chunk_db)
+static char *map_chunkdb_ctor(const char *spec, struct chunk_db *chunk_db)
 {
 	struct db_info *db_info = chunk_db->db_info;
 	int error;
@@ -150,14 +150,15 @@ static int map_chunkdb_ctor(const char *spec, struct chunk_db *chunk_db)
 
 	error = sqlite3_open(db_info->db_name, &db_info->sqlite3_db);
 	if (error != SQLITE_OK) {
-		fprintf(stderr, "Can't open SQLite database '%s': %s\n",
+		char *errstr = sprintf_new(
+				"Can't open SQLite database '%s': %s\n",
 				db_info->db_name,
 				sqlite3_errmsg(db_info->sqlite3_db));
 		sqlite3_close(db_info->sqlite3_db);
-		return -EINVAL;
+		return errstr;
 	}
 
-	return 0;
+	return NULL;
 }
 
 static struct chunk_db_type map_chunkdb_type = {

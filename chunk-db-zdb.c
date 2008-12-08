@@ -536,7 +536,7 @@ static int issue_request(struct evbuffer *evbuf, struct zdb_info *db_info,
 	return error;
 }
 
-static int zdb_read_chunk(unsigned char *chunk, const unsigned char *digest,
+static bool zdb_read_chunk(unsigned char *chunk, const unsigned char *digest,
 		void *db_info)
 {
 	struct evbuffer *request;
@@ -551,13 +551,13 @@ static int zdb_read_chunk(unsigned char *chunk, const unsigned char *digest,
 				digest_string(digest)) < 0) {
 		TRACE("evbuffer_add failed\n");
 		evbuffer_free(request);
-		return -EIO;
+		return FALSE;
 	}
 
-	return issue_request(request, db_info, digest, chunk);
+	return issue_request(request, db_info, digest, chunk) == 0;
 }
 
-static int zdb_write_chunk(const unsigned char *chunk,
+static bool zdb_write_chunk(const unsigned char *chunk,
 		const unsigned char *digest, void *db_info)
 {
 	struct evbuffer *request;
@@ -574,10 +574,10 @@ static int zdb_write_chunk(const unsigned char *chunk,
 			evbuffer_add(request, "\r\n", 2) < 0) {
 		TRACE("evbuffer_add failed\n");
 		evbuffer_free(request);
-		return -EIO;
+		return FALSE;
 	}
 
-	return issue_request(request, db_info, digest, NULL);
+	return issue_request(request, db_info, digest, NULL) == 0;
 }
 
 static const char *suffix(const char *str, const char *prefix)
@@ -588,7 +588,7 @@ static const char *suffix(const char *str, const char *prefix)
 	return NULL;
 }
 
-static int parse_spec(const char *spec, struct zdb_info *zdb_info)
+static char *parse_spec(const char *spec, struct zdb_info *zdb_info)
 {
 	static struct addrinfo ai_hint = {
 		.ai_family = AF_INET,
@@ -604,7 +604,7 @@ static int parse_spec(const char *spec, struct zdb_info *zdb_info)
 
 	spec_copy = alloca(strlen(spec + 1));
 	if (!spec_copy)
-		return -ENOMEM;
+		return ERR_PTR(ENOMEM);
 
 	strcpy(spec_copy, spec);
 
@@ -617,22 +617,19 @@ static int parse_spec(const char *spec, struct zdb_info *zdb_info)
 			addr = opt;
 			port = strchr(addr, ':');
 			if (!port) {
-				ERROR("No port\n");
-				return -EINVAL;
+				return sprintf_new(
+						"No port in zunkdb address.\n");
 			}
 			*port++ = 0;
 
 			err = getaddrinfo(addr, port, &ai_hint, &ai_list);
 			if (err < 0) {
-				err = -errno;
-				ERROR("getaddrinfo: %s\n", strerror(errno));
-				return err;
+				return sprintf_new("zunkdb getaddrinfo: %s\n",
+						strerror(errno));
 			}
 
-			if (!ai_list) {
-				ERROR("ai_list == NULL\n");
-				return -EINVAL;
-			}
+			if (!ai_list)
+				return sprintf_new("zunkdb ai_list == NULL\n");
 
 			/*
 			 * Just take the first addr for now.
@@ -644,27 +641,27 @@ static int parse_spec(const char *spec, struct zdb_info *zdb_info)
 
 		} else if ((value = suffix(opt, "timeout="))) {
 			zdb_info->request_timeout.tv_sec = atoi(value);
-			if (!zdb_info->request_timeout.tv_sec)
-				return -EINVAL;
+			if (!zdb_info->request_timeout.tv_sec) {
+				return sprintf_new("zunkdb: invalid timeout "
+						"value of %s\n", value);
+			}
 
 		} else if (!strcmp(opt, "store")) {
 			zdb_info->store_method = STORE_CHUNK;
 
 		} else {
-			ERROR("Unknown option: %s\n", opt);
-			return -EINVAL;
+			return sprintf_new("zunkdb: unknown option '%s'\n",
+					opt);
 		}
 	}
 
-	if (!addr) {
-		ERROR("No address.\n");
-		return -EINVAL;
-	}
+	if (!addr)
+		return sprintf_new("No address specified for zunkdb.\n");
 
 	return 0;
 }
 
-static int zdb_chunkdb_ctor(const char *spec, struct chunk_db *chunk_db)
+static char *zdb_chunkdb_ctor(const char *spec, struct chunk_db *chunk_db)
 {
 	struct zdb_info *zdb_info = chunk_db->db_info;
 

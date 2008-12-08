@@ -2,6 +2,7 @@
 #define __ZUNKFS_CHUNKDB_H__
 
 #include "list.h"
+#include "utils.h"
 
 struct chunk_db;
 
@@ -9,10 +10,12 @@ struct chunk_db_type {
 	const char *spec_prefix;
 	unsigned info_size;
 	struct list_head type_entry;
-	int (*ctor)(const char *spec, struct chunk_db *chunk_db);
-	int (*read_chunk)(unsigned char *chunk, const unsigned char *digest,
+	/* return error string, freed by caller, NULL if successful */
+	char *(*ctor)(const char *spec, struct chunk_db *chunk_db);
+	/* return TRUE if successful, FALSE otherwise. */
+	bool (*read_chunk)(unsigned char *chunk, const unsigned char *digest,
 			void *db_info);
-	int (*write_chunk)(const unsigned char *chunk,
+	bool (*write_chunk)(const unsigned char *chunk,
 			const unsigned char *digest, void *db_info);
 	/*
 	 * Help string. Format is:
@@ -40,7 +43,7 @@ struct chunk_db {
 #define CHUNKDB_NC 4 /* not-a-cache */
 
 void register_chunkdb(struct chunk_db_type *type);
-int add_chunkdb(const char *spec);
+char *add_chunkdb(const char *spec);
 
 void help_chunkdb(void);
 

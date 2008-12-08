@@ -202,3 +202,31 @@ struct sockaddr_in *__string_sockaddr_in(const char *str,
 	return sa;
 }
 
+static char *vsprintf_new(const char *fmt, va_list ap)
+{
+	va_list ap_copy;
+	char *str, dummy[1];
+	int len;
+
+	va_copy(ap_copy, ap);
+	len = vsnprintf(dummy, 1, fmt, ap_copy);
+
+	str = malloc(len + 1);
+	if (str)
+		sprintf(str, fmt, ap);
+
+	return str;
+}
+
+char *sprintf_new(const char *fmt, ...)
+{
+	va_list ap;
+	char *str;
+
+	va_start(ap, fmt);
+	str = vsprintf_new(fmt, ap);
+	va_end(ap);
+
+	return str;
+}
+

@@ -88,16 +88,17 @@ static void usage(int exit_code)
 
 static void proc_opt(int opt, char *arg)
 {
+	char *errstr;
 	int err;
 
 	switch(opt) {
 	case OPT_HELP:
 		usage(0);
 	case OPT_CHUNK_DB:
-		err = add_chunkdb(arg);
-		if (err) {
+		errstr = add_chunkdb(arg);
+		if (errstr) {
 			fprintf(stderr, "Failed to add chunk db %s: %s\n", arg,
-					strerror(-err));
+					STR_OR_ERROR(errstr));
 			exit(-2);
 		}
 		break;

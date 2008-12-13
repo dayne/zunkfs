@@ -212,9 +212,10 @@ static char *vsprintf_new(const char *fmt, va_list ap)
 	len = vsnprintf(dummy, 1, fmt, ap_copy);
 
 	str = malloc(len + 1);
-	if (str)
-		sprintf(str, fmt, ap);
+	if (!str)
+		return PTR_ERR(ENOMEM);
 
+	sprintf(str, fmt, ap);
 	return str;
 }
 

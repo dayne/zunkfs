@@ -38,7 +38,7 @@ static bool xfer_chunk(unsigned char *chunk, const unsigned char *digest,
 	err = pipe(fd);
 	if (err) {
 		ERROR("pipe: %s\n", strerror(errno));
-		return FALSE;
+		return false;
 	}
 
 	pid = fork();
@@ -46,7 +46,7 @@ static bool xfer_chunk(unsigned char *chunk, const unsigned char *digest,
 		ERROR("fork: %s\n", strerror(errno));
 		close(fd[0]);
 		close(fd[1]);
-		return FALSE;
+		return false;
 	}
 
 	if (pid) {
@@ -63,7 +63,7 @@ static bool xfer_chunk(unsigned char *chunk, const unsigned char *digest,
 				close(fd[1]);
 				kill(pid, 9);
 				waitpid(pid, NULL, 0);
-				return FALSE;
+				return false;
 			}
 			if (!n)
 				break;
@@ -80,7 +80,7 @@ static bool xfer_chunk(unsigned char *chunk, const unsigned char *digest,
 
 		TRACE("len=%d", len);
 
-		return TRUE;
+		return true;
 	}
 
 	close(fd[0]);
@@ -123,10 +123,8 @@ static char *cmd_chunkdb_ctor(const char *spec, struct chunk_db *cdb)
 {
 	TRACE("mode=0x%x spec=%s\n", cdb->mode, spec);
 
-	if (access(spec, X_OK)) {
-		return sprintf_new("%s is not executable: %s\n", spec,
-				strerror(errno));
-	}
+	if (access(spec, X_OK))
+		return sprintf_new("%s is not executable.", spec);
 
 	cdb->db_info = (void *)spec;
 	return NULL;

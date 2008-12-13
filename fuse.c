@@ -537,8 +537,8 @@ static int opt_proc(void *data, const char *arg, int key,
 		arg += 11;
 		errstr = add_chunkdb(arg);
 		if (errstr) {
-			fprintf(stderr, "Failed to add chunkdb %s: %s\n", arg,
-					STR_OR_ERROR(errstr));
+			fprintf(stderr, "Failed to add chunkdb \"%s\": %s\n",
+					arg, STR_OR_ERROR(errstr));
 			return -1;
 		}
 		return 0;
@@ -559,7 +559,6 @@ int main(int argc, char **argv)
 	prog = basename(argv[0]);
 
 	if (fuse_opt_parse(&args, NULL, zunkfs_opts, opt_proc)) {
-		usage();
 		return -1;
 	}
 

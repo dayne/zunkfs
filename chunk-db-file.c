@@ -236,7 +236,7 @@ static bool file_read_chunk(unsigned char *chunk, const unsigned char *digest,
 {
 	struct db *db = db_info;
 	unsigned char *db_chunk;
-	bool status = FALSE;
+	bool status = false;
 
 	flock(db->fd, LOCK_SH);
 
@@ -247,7 +247,7 @@ static bool file_read_chunk(unsigned char *chunk, const unsigned char *digest,
 					digest_string(digest), 
 					strerror(PTR_ERR(db_chunk)));
 		} else {
-			status = TRUE;
+			status = true;
 			memcpy(chunk, db_chunk, CHUNK_SIZE);
 			unmap_chunk(db_chunk);
 		}
@@ -262,7 +262,7 @@ static bool file_write_chunk(const unsigned char *chunk,
 {
 	struct db *db = db_info;
 	unsigned char *db_chunk;
-	bool status = FALSE;
+	bool status = false;
 	int error;
 
 	flock(db->fd, LOCK_EX);
@@ -274,7 +274,7 @@ static bool file_write_chunk(const unsigned char *chunk,
 					digest_string(digest),
 					strerror(PTR_ERR(db_chunk)));
 		} else
-			status = TRUE;
+			status = true;
 		goto out;
 	}
 
@@ -305,7 +305,7 @@ static bool file_write_chunk(const unsigned char *chunk,
 		goto out;
 	}
 
-	status = TRUE;
+	status = true;
 	db->next_nr ++;
 out:
 	unmap_chunk(db_chunk);
@@ -323,10 +323,8 @@ static char *file_chunkdb_ctor(const char *spec, struct chunk_db *chunk_db)
 	db->ro = (chunk_db->mode == CHUNKDB_RO);
 
 	db->fd = open(path, db->ro ? O_RDONLY : O_RDWR|O_CREAT, 0644);
-	if (db->fd < 0) {
-		return sprintf_new("Can't open %s: %s\n", path, 
-				strerror(errno));
-	}
+	if (db->fd < 0)
+		return sprintf_new("Can't open %s: %s.", path, strerror(errno));
 
 	if (fstat(db->fd, &st))
 		goto set_error;
@@ -351,7 +349,7 @@ set_error:
 	error = -errno;
 error:
 	close(db->fd);
-	return sprintf_new("Error loading database file %s: %s\n", path,
+	return sprintf_new("Error loading database file %s: %s.", path,
 			strerror(-error));
 }
 

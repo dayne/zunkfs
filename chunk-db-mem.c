@@ -41,7 +41,7 @@ static bool mem_read_chunk(unsigned char *chunk, const unsigned char *digest,
 	struct cache *cache = db_info;
 	struct chunk *cp;
 	struct list_head *bucket;
-	bool status = FALSE;
+	bool status = false;
 
 	lock(&cache->mutex);
 
@@ -51,7 +51,7 @@ static bool mem_read_chunk(unsigned char *chunk, const unsigned char *digest,
 		if (!memcmp(digest, cp->digest, CHUNK_DIGEST_LEN)) {
 			memcpy(chunk, cp->data, CHUNK_SIZE);
 			list_move(&cp->lru_entry, &cache->chunk_lru);
-			status = TRUE;
+			status = true;
 			break;
 		}
 	}
@@ -67,7 +67,7 @@ static bool mem_write_chunk(const unsigned char *chunk,
 	struct cache *cache = db_info;
 	struct list_head *bucket;
 	struct chunk *cp;
-	bool status = FALSE;
+	bool status = false;
 
 	lock(&cache->mutex);
 
@@ -100,7 +100,7 @@ static bool mem_write_chunk(const unsigned char *chunk,
 	}
 
 found:
-	status = TRUE;
+	status = true;
 out:
 	unlock(&cache->mutex);
 	return status;
@@ -112,7 +112,7 @@ static char *mem_chunkdb_ctor(const char *spec, struct chunk_db *chunk_db)
 	unsigned i;
 
 	if (!(chunk_db->mode & CHUNKDB_RW))
-		return sprintf_new("Memory cache has to be writable.\n");
+		return sprintf_new("Memory cache has to be writable.");
 
 	list_head_init(&cache->chunk_lru);
 	init_mutex(&cache->mutex);

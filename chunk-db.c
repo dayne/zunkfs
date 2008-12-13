@@ -75,7 +75,7 @@ char *add_chunkdb(const char *spec)
 		mode = CHUNKDB_RW;
 		spec += 3;
 	} else {
-		return sprintf_new("No mode (ro/rw) in spec: %s\n", spec);
+		return sprintf_new("No mode (ro/rw) in spec.");
 	}
 
 	if (mode == CHUNKDB_RW) {
@@ -97,14 +97,12 @@ char *add_chunkdb(const char *spec)
 			goto found;
 	}
 
-	return sprintf_new("Unknown chunk-db: %s\n", spec);
+	return sprintf_new("Unknown chunk-db.");
 found:
 	if ((mode & (CHUNKDB_RO|CHUNKDB_RW)) && !type->read_chunk)
-		return sprintf_new("Chunk-db %s does not spport reading.\n",
-				type->spec_prefix);
+		return sprintf_new("Chunk-db does not spport reading.");
 	if ((mode & CHUNKDB_RW) && !type->write_chunk)
-		return sprintf_new("Chunk-db %s does not support writing.\n",
-				type->spec_prefix);
+		return sprintf_new("Chunk-db does not support writing.");
 
 	cdb = malloc(sizeof(struct chunk_db) + type->info_size);
 	if (!cdb)
@@ -148,7 +146,7 @@ bool read_chunk(unsigned char *chunk, const unsigned char *digest)
 	}
 
 	TRACE("chunk not found: %s\n", digest_string(digest));
-	return FALSE;
+	return false;
 cache_chunk:
 	for (;;) {
 		cdb = list_prev_entry(cdb, db_entry);
@@ -159,14 +157,14 @@ cache_chunk:
 			type->write_chunk(chunk, digest, cdb->db_info);
 	}
 
-	return TRUE;
+	return true;
 }
 
 bool write_chunk(const unsigned char *chunk, unsigned char *digest)
 {
 	struct chunk_db *cdb;
 	struct chunk_db_type *type;
-	bool wrote = FALSE;
+	bool wrote = false;
 
 	digest_chunk(chunk, digest);
 
@@ -177,7 +175,7 @@ bool write_chunk(const unsigned char *chunk, unsigned char *digest)
 		if ((cdb->mode & CHUNKDB_RW)) {
 			if (!type->write_chunk(chunk, digest, cdb->db_info))
 				continue;
-			wrote = TRUE;
+			wrote = true;
 			if (!(cdb->mode & CHUNKDB_WT))
 				break;
 		}

@@ -551,7 +551,7 @@ static bool zdb_read_chunk(unsigned char *chunk, const unsigned char *digest,
 				digest_string(digest)) < 0) {
 		TRACE("evbuffer_add failed\n");
 		evbuffer_free(request);
-		return FALSE;
+		return false;
 	}
 
 	return issue_request(request, db_info, digest, chunk) == 0;
@@ -574,7 +574,7 @@ static bool zdb_write_chunk(const unsigned char *chunk,
 			evbuffer_add(request, "\r\n", 2) < 0) {
 		TRACE("evbuffer_add failed\n");
 		evbuffer_free(request);
-		return FALSE;
+		return false;
 	}
 
 	return issue_request(request, db_info, digest, NULL) == 0;
@@ -616,20 +616,16 @@ static char *parse_spec(const char *spec, struct zdb_info *zdb_info)
 		if (!opt_count) {
 			addr = opt;
 			port = strchr(addr, ':');
-			if (!port) {
-				return sprintf_new(
-						"No port in zunkdb address.\n");
-			}
+			if (!port)
+				return sprintf_new("No port in address.");
 			*port++ = 0;
 
 			err = getaddrinfo(addr, port, &ai_hint, &ai_list);
-			if (err < 0) {
-				return sprintf_new("zunkdb getaddrinfo: %s\n",
-						strerror(errno));
-			}
+			if (err)
+				return sprintf_new("%s.", gai_strerror(err));
 
 			if (!ai_list)
-				return sprintf_new("zunkdb ai_list == NULL\n");
+				return sprintf_new("ai_list == NULL.");
 
 			/*
 			 * Just take the first addr for now.
@@ -642,21 +638,20 @@ static char *parse_spec(const char *spec, struct zdb_info *zdb_info)
 		} else if ((value = suffix(opt, "timeout="))) {
 			zdb_info->request_timeout.tv_sec = atoi(value);
 			if (!zdb_info->request_timeout.tv_sec) {
-				return sprintf_new("zunkdb: invalid timeout "
-						"value of %s\n", value);
+				return sprintf_new("Invalid timeout "
+						"value of %s.", value);
 			}
 
 		} else if (!strcmp(opt, "store")) {
 			zdb_info->store_method = STORE_CHUNK;
 
 		} else {
-			return sprintf_new("zunkdb: unknown option '%s'\n",
-					opt);
+			return sprintf_new("Unknown option '%s'.", opt);
 		}
 	}
 
 	if (!addr)
-		return sprintf_new("No address specified for zunkdb.\n");
+		return sprintf_new("No address specified.");
 
 	return 0;
 }

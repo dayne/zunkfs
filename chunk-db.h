@@ -1,8 +1,8 @@
 #ifndef __ZUNKFS_CHUNKDB_H__
 #define __ZUNKFS_CHUNKDB_H__
 
+#include <stdbool.h>
 #include "list.h"
-#include "utils.h"
 
 struct chunk_db;
 

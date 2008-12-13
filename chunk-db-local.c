@@ -25,7 +25,7 @@ static bool local_read_chunk(unsigned char *chunk, const unsigned char *digest,
 
 	err = asprintf(&path, "%s/%s", chunk_dir, digest_string(digest));
 	if (err < 0)
-		return FALSE;
+		return false;
 
 	TRACE("path=%s\n", path);
 
@@ -33,7 +33,7 @@ static bool local_read_chunk(unsigned char *chunk, const unsigned char *digest,
 	if (fd < 0) {
 		WARNING("%s: %s\n", path, strerror(errno));
 		free(path);
-		return FALSE;
+		return false;
 	}
 	free(path);
 
@@ -45,13 +45,13 @@ static bool local_read_chunk(unsigned char *chunk, const unsigned char *digest,
 				continue;
 			WARNING("read %s: %s\n", path, strerror(errno));
 			close(fd);
-			return FALSE;
+			return false;
 		}
 		len += n;
 	}
 	close(fd);
 
-	return TRUE;
+	return true;
 }
 
 static bool local_write_chunk(const unsigned char *chunk, 
@@ -64,7 +64,7 @@ static bool local_write_chunk(const unsigned char *chunk,
 
 	err = asprintf(&path, "%s/%s", chunk_dir, digest_string(digest));
 	if (err < 0)
-		return FALSE;
+		return false;
 
 	TRACE("path=%s\n", path);
 
@@ -72,7 +72,7 @@ static bool local_write_chunk(const unsigned char *chunk,
 	if (fd < 0) {
 		WARNING("%s: %s\n", path, strerror(errno));
 		free(path);
-		return FALSE;
+		return false;
 	}
 	free(path);
 
@@ -84,15 +84,15 @@ static bool local_write_chunk(const unsigned char *chunk,
 				continue;
 			WARNING("%s: %s\n", path, strerror(errno));
 			close(fd);
-			return FALSE;
+			return false;
 		}
 		len += n;
 	}
 	err = close(fd);
 	if (err)
-		return FALSE;
+		return false;
 
-	return TRUE;
+	return true;
 }
 
 static char *local_chunkdb_ctor(const char *spec, struct chunk_db *cdb)
@@ -104,13 +104,11 @@ static char *local_chunkdb_ctor(const char *spec, struct chunk_db *cdb)
 
 	err = stat(spec, &stbuf);
 	if (err == -1)
-		return sprintf_new("Can't stat %s: %s\n", spec,
-				strerror(errno));
+		return sprintf_new("Can't stat %s: %s.", spec, strerror(errno));
 	if (!S_ISDIR(stbuf.st_mode))
-		return sprintf_new("%s is not a directory.\n", spec);
+		return sprintf_new("%s is not a directory.", spec);
 	if (access(spec, R_OK | ((cdb->mode & CHUNKDB_RW) ? W_OK : 0)))
-		return sprintf_new("Can't access %s: %s\n", spec,
-				strerror(errno));
+		return sprintf_new("%s.", strerror(errno));
 
 	cdb->db_info = (void *)spec;
 

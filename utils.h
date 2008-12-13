@@ -113,11 +113,6 @@ static inline int IS_ERR(const void *ptr)
 
 char *sprintf_new(const char *fmt, ...);
 
-#undef TRUE
-#undef FALSE
-
-typedef enum { FALSE, TRUE } bool;
-
 /*
  * Socket helpers
  */

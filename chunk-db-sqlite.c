@@ -42,7 +42,7 @@ static bool write_chunk_sqlite(const unsigned char *chunk,
 		ERROR("sqlite3_prepare failed: %s\n",
 				sqlite3_errmsg(db_info->db));
 		unlock_db(db_info);
-		return FALSE;
+		return false;
 	}
 
 	sqlite3_bind_text(stmt, 1, digest_string(digest), -1, SQLITE_STATIC);
@@ -55,11 +55,11 @@ static bool write_chunk_sqlite(const unsigned char *chunk,
 		ERROR("sqlite3_finalize failed: %s\n",
 				sqlite3_errmsg(db_info->db));
 		unlock_db(db_info);
-		return FALSE;
+		return false;
 	}
 
 	unlock_db(db_info);
-	return TRUE;
+	return true;
 }
 
 static bool read_chunk_sqlite(unsigned char *chunk, const unsigned char *digest,
@@ -69,7 +69,7 @@ static bool read_chunk_sqlite(unsigned char *chunk, const unsigned char *digest,
 	struct db_info *db_info = db_info_ptr;
 	sqlite3_stmt *stmt;
 	int err;
-	bool status = FALSE;
+	bool status = false;
 
 	lock_db(db_info);
 	err = sqlite3_prepare(db_info->db, sql, -1, &stmt, 0);
@@ -77,7 +77,7 @@ static bool read_chunk_sqlite(unsigned char *chunk, const unsigned char *digest,
 		ERROR("sqlite3_prepare failed: %d\n",
 				sqlite3_errmsg(db_info->db));
 		unlock_db(db_info);
-		return FALSE;
+		return false;
 	}
 
 	TRACE("%s\n", digest_string(digest));
@@ -94,7 +94,7 @@ static bool read_chunk_sqlite(unsigned char *chunk, const unsigned char *digest,
 	} else {
 		TRACE("sqlite3 query got chunk.\n");
 		memcpy(chunk, sqlite3_column_blob(stmt, 0), CHUNK_SIZE);
-		status = TRUE;
+		status = true;
 	}
 
 	sqlite3_finalize(stmt);
@@ -113,7 +113,7 @@ static char *sqlite_chunkdb_ctor(const char *spec, struct chunk_db *chunk_db)
 	error = sqlite3_open(spec, &db_info->db);
 	if (error != SQLITE_OK) {
 		char *errstr = sprintf_new(
-				"Can't open SQLite database '%s': %s\n",
+				"Can't open SQLite database '%s': %s.",
 				spec, sqlite3_errmsg(db_info->db));
 		sqlite3_close(db_info->db);
 		return errstr;

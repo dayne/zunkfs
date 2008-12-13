@@ -130,7 +130,7 @@ static bool map_read_chunk(unsigned char *chunk, const unsigned char *digest,
 
 	err = asprintf(&query, map_query, digest_string(digest));
 	if (err)
-		return FALSE;
+		return false;
 
 	err = -EIO;
 	if (db->query_map(db, query, &map))
@@ -151,7 +151,7 @@ static char *map_chunkdb_ctor(const char *spec, struct chunk_db *chunk_db)
 	error = sqlite3_open(db_info->db_name, &db_info->sqlite3_db);
 	if (error != SQLITE_OK) {
 		char *errstr = sprintf_new(
-				"Can't open SQLite database '%s': %s\n",
+				"Can't open SQLite database '%s': %s.",
 				db_info->db_name,
 				sqlite3_errmsg(db_info->sqlite3_db));
 		sqlite3_close(db_info->sqlite3_db);

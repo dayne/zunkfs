@@ -6,8 +6,9 @@
 #endif
 
 #include <string.h>
+#include <stdbool.h>
+
 #include "digest.h"
-#include "utils.h"
 
 #define CHUNK_DIGEST_LEN	SHA_DIGEST_LENGTH
 #define CHUNK_DIGEST_STRLEN	SHA_DIGEST_STRLEN

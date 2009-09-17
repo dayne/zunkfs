@@ -12,6 +12,7 @@
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <unistd.h>
 #include <limits.h>
 #include <dirent.h>
@@ -28,6 +29,67 @@
 #include "dir.h"
 #include "file.h"
 
+#ifndef BLOCK_SIZE
+#define BLOCK_SIZE 512
+#endif
+
+#ifndef CHUNK_BLOCKS
+#define CHUNK_BLOCKS (CHUNK_SIZE / BLOCK_SIZE)
+#endif
+
+static int zunkfs_calc_size(struct dentry *dentry, void *data)
+{
+	struct statvfs *stbuf = data;
+
+	if (S_ISREG(dentry->mode))
+		stbuf->f_files ++;
+
+	stbuf->f_blocks += (uint64_t)dentry_chunk_count(dentry) * CHUNK_BLOCKS;
+
+	if (S_ISREG(dentry->mode))
+		return 0;
+
+	return scan_dir(dentry, zunkfs_calc_size, data);
+}
+
+static int zunkfs_statfs(const char *path, struct statvfs *stbuf)
+{
+	struct dentry *dentry;
+	int error;
+
+	TRACE("%s\n", path);
+
+	/*
+	 * This is a bit painful, as there's no size information
+	 * in the root dentry, nor is there a superblock to record
+	 * total size. So instead, we need to iterate the entire FS
+	 * and calculate the size of each dentry.
+	 */
+
+	dentry = find_dentry(path, NULL);
+	if (IS_ERR(dentry))
+		return -PTR_ERR(dentry);
+	if (!S_ISDIR(dentry->mode)) {
+		put_dentry(dentry);
+		return -ENOTDIR;
+	}
+	
+	memset(stbuf, 0, sizeof(struct statvfs));
+
+	stbuf->f_bsize = BLOCK_SIZE;
+	stbuf->f_blocks = 2 * CHUNK_BLOCKS; /* root's data & secret chunks */
+	stbuf->f_bfree = ~0UL;
+	stbuf->f_bavail = ~0UL;
+	stbuf->f_files = 0;
+	stbuf->f_ffree = ~0UL;
+	stbuf->f_namemax = DDENT_NAME_MAX;
+
+	error = scan_dir(dentry, zunkfs_calc_size, stbuf);
+	put_dentry(dentry);
+
+	return error;
+}
+
 static int zunkfs_getattr(const char *path, struct stat *stbuf)
 {
 	struct dentry *dentry;
@@ -43,18 +105,33 @@ static int zunkfs_getattr(const char *path, struct stat *stbuf)
 
 	lock(&dentry->mutex);
 
+	/*
+	 * secret_digest does not change during the lifetime
+	 * of a dentry, and it's supposed to be random.
+	 * Hopefully that's good enough to generate a unique
+	 * inode number.
+	 */
 	memcpy(&stbuf->st_ino, dentry->ddent->secret_digest, sizeof(ino_t));
-	stbuf->st_mode = dentry->ddent->mode;
+
+	stbuf->st_mode = dentry->mode;
+
+	/* hardlinks aren't supported */
 	stbuf->st_nlink = 1;
+
+	/* same for different users and groups */
 	stbuf->st_uid = getuid();
 	stbuf->st_gid = getgid();
+
 	stbuf->st_size = dentry->size;
-	stbuf->st_atime = dentry->mtime;
-	stbuf->st_mtime = dentry->mtime;
-	stbuf->st_ctime = dentry->ddent->ctime;
+
+	stbuf->st_atime = dentry->mtime.tv_sec;
+	stbuf->st_mtime = dentry->mtime.tv_sec;
+	stbuf->st_ctime = le32toh(dentry->ddent->ctime);
+
 	stbuf->st_blksize = 4096;
 	stbuf->st_blocks = (dentry->size + 4095) / 4096;
 
+	/* directory should really be treated as a file... */
 	if (dir_as_file) {
 		stbuf->st_mode &= ~S_IFDIR;
 		stbuf->st_mode |= S_IFREG;
@@ -67,24 +144,40 @@ static int zunkfs_getattr(const char *path, struct stat *stbuf)
 	return 0;
 }
 
+struct filldir_data {
+	fuse_fill_dir_t func;
+	void *buf;
+};
+
+static int zunkfs_filldir(struct dentry *dentry, void *data)
+{
+	struct filldir_data *fdd = data;
+
+	if (fdd->func(fdd->buf, (char *)dentry->ddent->name, NULL, 0))
+		return -ENOBUFS;
+
+	return 0;
+}
+
 static int zunkfs_readdir(const char *path, void *filldir_buf,
 		fuse_fill_dir_t filldir, off_t offset,
 		struct fuse_file_info *fuse_file)
 {
+	struct filldir_data fdd;
 	struct dentry *dentry;
-	struct dentry *child;
-	struct dentry *prev;
-	unsigned i;
 	int err;
 
-	TRACE("%s\n", path);
+	TRACE("path=%s offset=%llu\n", path, offset);
+
+	if (offset)
+		return -EINVAL;
 
 	dentry = find_dentry(path, NULL);
 	if (IS_ERR(dentry))
 		return -PTR_ERR(dentry);
 
 	err = -ENOTDIR;
-	if (!S_ISDIR(dentry->ddent->mode))
+	if (!S_ISDIR(dentry->mode))
 		goto out;
 
 	err = -ENOBUFS;
@@ -92,29 +185,11 @@ static int zunkfs_readdir(const char *path, void *filldir_buf,
 			filldir(filldir_buf, "..", NULL, 0))
 		goto out;
 
-	/* racy, but should be OK */
-	prev = NULL;
-	for (i = 0; ; i ++) {
-		child = get_nth_dentry(dentry, i);
-		if (IS_ERR(child)) {
-			err = -PTR_ERR(child);
-			if (err == -ENOENT)
-				err = 0;
-			goto out;
-		}
-		TRACE("%s\n", (char *)child->ddent->name);
-		if (filldir(filldir_buf, (char *)child->ddent->name, NULL, 0)) {
-			err = -ENOBUFS;
-			put_dentry(child);
-			goto out;
-		}
-		if (prev)
-			put_dentry(prev);
-		prev = child;
-	}
+	fdd.func = filldir;
+	fdd.buf = filldir_buf;
+
+	err = scan_dir(dentry, zunkfs_filldir, &fdd);
 out:
-	if (prev)
-		put_dentry(prev);
 	put_dentry(dentry);
 	return err;
 }
@@ -250,12 +325,12 @@ static int zunkfs_rmdir(const char *path)
 		return -PTR_ERR(dentry);
 
 	err = -ENOTDIR;
-	if (!S_ISDIR(dentry->ddent->mode))
+	if (!S_ISDIR(dentry->mode))
 		goto out;
 
 	err = -EBUSY;
 	if (dentry->size)
-		put_dentry(dentry);
+		goto out;
 
 	err = del_dentry(dentry);
 out:
@@ -273,12 +348,12 @@ static int zunkfs_utimens(const char *path, const struct timespec tv[2])
 	if (IS_ERR(dentry))
 		return -PTR_ERR(dentry);
 
-	lock(dentry->ddent_mutex);
-	if (dentry->ddent->mtime != tv[1].tv_sec) {
-		dentry->ddent->mtime = tv[1].tv_sec;
-		dentry->ddent_cnode->dirty = 1;
-	}
-	unlock(dentry->ddent_mutex);
+	lock(&dentry->mutex);
+	dentry->mtime.tv_sec = tv[1].tv_sec;
+	dentry->mtime.tv_usec = tv[1].tv_nsec / 1000;
+	dentry->dirty = 1;
+	unlock(&dentry->mutex);
+
 	put_dentry(dentry);
 
 	return 0;
@@ -329,6 +404,7 @@ static int zunkfs_chmod(const char *path, mode_t mode)
 }
 
 static struct fuse_operations zunkfs_operations = {
+	.statfs		= zunkfs_statfs,
 	.getattr	= zunkfs_getattr,
 	.readdir	= zunkfs_readdir,
 	.open		= zunkfs_open,
@@ -349,6 +425,7 @@ static void set_root_file(const char *fs_descr)
 {
 	static DECLARE_MUTEX(root_mutex);
 	struct disk_dentry *root_ddent;
+	struct timeval now;
 	int err, fd;
 
 	fd = open(fs_descr, O_RDWR|O_CREAT, 0600);
@@ -367,10 +444,13 @@ static void set_root_file(const char *fs_descr)
 	if (root_ddent->name[0] == '\0') {
 		namcpy(root_ddent->name, "/");
 
-		root_ddent->mode = S_IFDIR | S_IRWXU;
-		root_ddent->size = 0;
-		root_ddent->ctime = time(NULL);
-		root_ddent->mtime = time(NULL);
+		gettimeofday(&now, NULL);
+
+		root_ddent->mode = htole16(S_IFDIR | S_IRWXU);
+		root_ddent->size = htole64(0);
+		root_ddent->ctime = htole32(now.tv_sec);
+		root_ddent->mtime = htole32(now.tv_sec);
+		root_ddent->mtime_csec = now.tv_usec / 10000;
 
 		err = random_chunk_digest(root_ddent->secret_digest);
 		if (err < 0) {
@@ -411,10 +491,24 @@ static const char *prog = NULL;
 static void usage(void)
 {
 	/* FIXME: Need to play nicely with FUSE's --help. */
-	fprintf(stderr, "Usage: %s [options] root_ddent mountpt\n", prog);
-	fprintf(stderr, "\t--log=[level,]<file|stderr|stdout>\n");
-	fprintf(stderr, "\t\tlevel is one of (E)rror, (W)arning, (T)race\n");
-	fprintf(stderr, "\t--chunk-db=<rw|ro>,<dbspec>\n");
+	fprintf(stderr,
+"usage: %s [options] root_ddent mountpt [mount options]\n"
+"zunkfs options:\n"
+"   --log=[level,]<file>     Log zunkfs events. Level is one of (E)rror,\n"
+"                            (W)arning, or (T)race. File can be a file,\n"
+"                            stdout, or stderr.\n"
+"   --chunk-db=<mode>,<spec> Add chunk storage. Mode is either ro or rw.\n" 
+"                            rw can be followed by wt and/or nc. When writing,\n"
+"                            zunkfs will stop at the first writable db, unless\n"
+"                            the db is marked as write-through (wt). A read\n"
+"                            satisfied by chunkdb N will be cached by chunkdbs\n"
+"                            1...N-1 that are not marked as non-cachable (nc).\n"
+"                            Examples: \n"
+"                               --chunk-db=ro,dir:/foo\n"
+"                               --chunk-db=rw,wt,nc,mem=1000\n"
+"\n"
+"Available chunk databases:\n", prog);
+	help_chunkdb();
 	fprintf(stderr, "\n");
 }
 
@@ -422,37 +516,29 @@ static int opt_proc(void *data, const char *arg, int key,
 		struct fuse_args *args)
 {
 	static unsigned root_set = 0;
+	char *errstr;
 	int err;
 
 	switch(key) {
 	case OPT_HELP:
 		usage();
-		return 1;
+		if (fuse_opt_insert_arg(args, 1, "-ho"))
+			return -1;
+		return 0;
 	case OPT_LOG:
-		if (zunkfs_log_fd) {
-			fprintf(stderr, "Log file specified more than once.\n");
+		err = set_logging(arg + 6);
+		if (err) {
+			fprintf(stderr, "Failed to enable logging: %s\n",
+					strerror(-err));
 			return -1;
 		}
-		arg += 6;
-		if (arg[1] == ',') {
-			if (!strchr("EWT", arg[0]))
-				return -1;
-			zunkfs_log_level = arg[0];
-			arg += 2;
-		}
-		if (!strcmp(arg, "stderr"))
-			zunkfs_log_fd = stderr;
-		else if (!strcmp(arg, "stdout"))
-			zunkfs_log_fd = stdout;
-		else
-			zunkfs_log_fd = fopen(arg, "w");
 		return 0;
 	case OPT_CHUNK_DB:
 		arg += 11;
-		err = add_chunkdb(arg);
-		if (err) {
-			fprintf(stderr, "Failed to add chunkdb %s: %s\n", arg,
-					strerror(-err));
+		errstr = add_chunkdb(arg);
+		if (errstr) {
+			fprintf(stderr, "Failed to add chunkdb \"%s\": %s\n",
+					arg, STR_OR_ERROR(errstr));
 			return -1;
 		}
 		return 0;
@@ -473,13 +559,13 @@ int main(int argc, char **argv)
 	prog = basename(argv[0]);
 
 	if (fuse_opt_parse(&args, NULL, zunkfs_opts, opt_proc)) {
-		usage();
 		return -1;
 	}
 
 	err = fuse_main(args.argc, args.argv, &zunkfs_operations, NULL);
 	if (!err)
 		flush_root();
+
 	return err;
 }
 

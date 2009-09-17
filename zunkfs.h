@@ -6,6 +6,8 @@
 #endif
 
 #include <string.h>
+#include <stdbool.h>
+
 #include "digest.h"
 
 #define CHUNK_DIGEST_LEN	SHA_DIGEST_LENGTH
@@ -15,8 +17,8 @@
 /*
  * write_chunk() updates 'digest' field.
  */
-int write_chunk(const unsigned char *chunk, unsigned char *digest);
-int read_chunk(unsigned char *chunk, const unsigned char *digest);
+bool write_chunk(const unsigned char *chunk, unsigned char *digest);
+bool read_chunk(unsigned char *chunk, const unsigned char *digest);
 void zero_chunk_digest(unsigned char *digest);
 int random_chunk_digest(unsigned char *digest);
 

@@ -1,5 +1,5 @@
 /*
- * ZunkDB back-end.
+ * ZunkDB client.
  */
 
 #define _GNU_SOURCE
@@ -26,46 +26,54 @@
 #include "base64.h"
 #include "list.h"
 
+extern struct event_base *current_base; /* In libevent */
+
 struct zdb_info {
 	struct sockaddr_in start_node;
-	struct timeval timeout;
-	unsigned min_concurrency;
-	unsigned max_concurrency;
+	struct timeval request_timeout;
+	struct timeval connect_timeout;
+	const char *store_method;
 };
 
-struct node;
+struct addr_queue {
+	struct sockaddr_in *addrs;
+	int head, len;
+};
+
+enum request_state { request_pending, request_waiting, request_timedout,
+	request_complete };
 
 struct request {
 	struct evbuffer *evbuf;
 	struct event_base *base;
 	unsigned char *chunk;
 	const unsigned char *digest;
-	struct list_head node_list;
-	struct sockaddr_in *addr_list;
-	unsigned addr_count;
-	unsigned addr_index;
-	unsigned addr_concurrency;
-	unsigned done;
+	enum request_state state;
+	struct addr_queue addr_queue;
+	struct list_head connecting_nodes;
+	struct timeval connect_timeout;
+	struct timeval timeout;
+	struct event timeout_event;
 };
 
+enum node_state { node_connecting, node_ready, node_dead };
+
 struct node {
+	int fd;
+	enum node_state state;
 	struct event connect_event;
+	struct timeval connect_timeout;
 	struct bufferevent *bev;
 	struct sockaddr_in addr;
-	int sk;
 	struct request *request;
 	struct list_head node_entry;
-	struct timeval stamp;
 };
 
 #define CACHE_MAX	100
 
 static LIST_HEAD(node_cache);
-static LIST_HEAD(dead_nodes);
 static unsigned cache_count = 0;
 static DECLARE_MUTEX(cache_mutex);
-
-static struct node dead_node;
 
 static inline int same_addr(const struct sockaddr_in *a,
 		const struct sockaddr_in *b)
@@ -80,156 +88,109 @@ static inline int node_is_addr(const struct node *node,
 	return same_addr(&node->addr, addr);
 }
 
-static inline int node_connected(struct node *node)
+static inline void addr_queue_init(struct addr_queue *q)
 {
-	return !event_pending(&node->connect_event, EV_WRITE, NULL);
+	q->len = q->head = 0;
+	q->addrs = (void *)0;
 }
 
-static void free_node(struct node *node)
+static inline void addr_queue_destroy(struct addr_queue *q)
 {
-	if (node->request)
-		node->request->addr_concurrency --;
-	list_del(&node->node_entry);
-	bufferevent_free(node->bev);
-	close(node->sk);
-	free(node);
+	free(q->addrs);
 }
 
-static struct node *find_node(const struct sockaddr_in *sa)
+static inline int addr_queue_empty(const struct addr_queue *q)
 {
-	struct node *node, *next;
-	struct timeval now;
-
-	lock(&cache_mutex);
-	list_for_each_entry(node, &node_cache, node_entry) {
-		if (node_is_addr(node, sa)) {
-			cache_count --;
-			list_del(&node->node_entry);
-			goto found;
-		}
-	}
-
-	if (list_empty(&dead_nodes))
-		goto not_found;
-
-	gettimeofday(&now, NULL);
-
-	list_for_each_entry_safe(node, next, &dead_nodes, node_entry) {
-		if (timercmp(&now, &node->stamp, >)) {
-			free_node(node);
-			continue;
-		}
-
-		if (node_is_addr(node, sa)) {
-			node = &dead_node;
-			goto found;
-		}
-	}
-not_found:	
-	node = NULL;
-found:
-	unlock(&cache_mutex);
-
-	return node;
+	return q->head == q->len;
 }
 
-static void release_node(struct node *node)
+static int queue_addr(struct addr_queue *q, const struct sockaddr_in *addr)
 {
-	node->request = NULL;
-	bufferevent_disable(node->bev, EV_READ|EV_WRITE);
-	list_del(&node->node_entry);
+	struct sockaddr_in *addrs;
+	int i;
+
+	if (!addr)
+		return 0;
+
+	for (i = 0; i < q->len; i ++)
+		if (same_addr(addr, &q->addrs[i]))
+			return 0;
+
+	addrs = realloc(q->addrs, (q->len + 1) * sizeof(struct sockaddr_in));
+	if (!addrs)
+		return 0;
+
+	q->addrs = addrs;
+	q->addrs[q->len++] = *addr;
+
+	return 1;
 }
 
-static void __cache_node(struct node *node)
+static int dequeue_addr(struct addr_queue *q, struct sockaddr_in *addr)
 {
-	release_node(node);
+	if (q->head == q->len)
+		return 0;
 
-	list_add(&node->node_entry, &node_cache);
-
-	if (++cache_count > CACHE_MAX) {
-		free_node(list_entry(node_cache.prev, struct node, node_entry));
-		cache_count --;
-	}
+	*addr = q->addrs[q->head++];
+	return 1;
 }
-
-static void cache_node(struct node *node)
+static inline int try_connect(struct node *node)
 {
-	lock(&cache_mutex);
-	__cache_node(node);
-	unlock(&cache_mutex);
-}
-
-static void __kill_node(struct node *node)
-{
-	release_node(node);
-	event_del(&node->connect_event);
-	close(node->sk);
-	list_add(&node->node_entry, &dead_nodes);
-	gettimeofday(&node->stamp, NULL);
-	node->stamp.tv_sec += 60;
+	return connect(node->fd, (struct sockaddr *)&node->addr,
+			sizeof(struct sockaddr_in)) ? -errno : 0;
 }
 
 static void kill_node(struct node *node)
 {
-	lock(&cache_mutex);
-	__kill_node(node);
-	unlock(&cache_mutex);
+	TRACE("node=%p %s:%u\n",
+			node,
+			inet_ntoa(node->addr.sin_addr),
+			ntohs(node->addr.sin_port));
+
+	assert(node->state != node_dead);
+
+	list_del(&node->node_entry);
+	bufferevent_free(node->bev);
+	close(node->fd);
+
+	memset(node, 0xff, sizeof(struct node));
+	node->state = node_dead;
 }
 
-static void release_node_list(struct list_head *list, int err)
+static struct node *find_node(const struct sockaddr_in *addr)
 {
 	struct node *node;
 
+	TRACE("%s:%u\n", 
+			inet_ntoa(addr->sin_addr),
+			ntohs(addr->sin_port));
+
 	lock(&cache_mutex);
-	while (!list_empty(list)) {
-		node = list_entry(list->next, struct node, node_entry);
-		if (!node_connected(node) || err == -ETIMEDOUT)
-			__kill_node(node);
-		else
-			__cache_node(node);
+	list_for_each_entry(node, &node_cache, node_entry) {
+		if (node_is_addr(node, addr)) {
+			list_del_init(&node->node_entry);
+			if (node->state == node_ready)
+				cache_count --;
+			goto found;
+		}
 	}
+	node = NULL;
+found:
 	unlock(&cache_mutex);
-}
 
-static void store_addr(struct request *request, struct sockaddr_in *addr)
-{
-	struct sockaddr_in *uaddr;
-	int i;
-
-	for (i = 0; i < request->addr_count; i ++) {
-		uaddr = &request->addr_list[i];
-		if (same_addr(addr, uaddr))
-			return;
-	}
-
-	uaddr = realloc(request->addr_list,
-			sizeof(struct sockaddr_in) * (i + 1));
-	if (!uaddr)
-		return;
-
-	uaddr[i] = *addr;
-	request->addr_list = uaddr;
-	request->addr_count ++;
+	TRACE("%s:%u => %p\n", 
+			inet_ntoa(addr->sin_addr),
+			ntohs(addr->sin_port),
+			node);
+	return node;
 }
 
 static void store_node(struct request *request, char *addr_str)
 {
-	struct sockaddr_in addr;
-	char *port;
-
-	port = strchr(addr_str, ':');
-	if (!port)
-		return;
-
-	*port++ = 0;
-
-	addr.sin_family = AF_INET;
-	addr.sin_port = htons(atoi(port));
-
-	if (!inet_aton(addr_str, &addr.sin_addr))
-		return;
-
-	store_addr(request, &addr);
+	TRACE("request=%p addr=%s\n", request, addr_str);
+	if (!queue_addr(&request->addr_queue, string_sockaddr_in(addr_str))) {
+		TRACE("duplicate!\n");
+	}
 }
 
 #define FIND_CHUNK		"find_chunk"
@@ -240,6 +201,8 @@ static void store_node(struct request *request, char *addr_str)
 #define REQUEST_DONE_LEN	(sizeof(REQUEST_DONE) - 1)
 #define STORE_NODE		"store_node"
 #define STORE_NODE_LEN		(sizeof(STORE_NODE) - 1)
+#define FORWARD_CHUNK		"forward_chunk"
+#define FORWARD_CHUNK_LEN	(sizeof(FORWARD_CHUNK) - 1)
 
 static int proc_msg(const char *buf, size_t len, struct node *node)
 {
@@ -253,17 +216,16 @@ static int proc_msg(const char *buf, size_t len, struct node *node)
 
 	if (!strncmp(msg, STORE_CHUNK, STORE_CHUNK_LEN)) {
 		msg += STORE_CHUNK_LEN + 1;
-		if (req->chunk) {
+		if (req->chunk)
 			base64_decode(msg, req->chunk, CHUNK_SIZE);
-			req->chunk = NULL;
-		}
 
 	} else if (!strncmp(msg, REQUEST_DONE, REQUEST_DONE_LEN)) {
 		msg += REQUEST_DONE_LEN + 1;
 		if (!strcmp(msg, digest_string(req->digest))) {
-			req->done ++;
-			req->addr_concurrency --;
-			cache_node(node);
+			if (req->chunk || addr_queue_empty(&req->addr_queue))
+				req->state = request_complete;
+			else
+				req->state = request_pending;
 			return 1;
 		}
 
@@ -298,194 +260,283 @@ static void readcb(struct bufferevent *bev, void *arg)
 static void errorcb(struct bufferevent *bev, short what, void *arg)
 {
 	struct node *node = arg;
-	TRACE("node=%p\n", node);
-	free_node(node);
+	struct request *r = node->request;
+
+	TRACE("node=%p %s:%u\n",
+			node,
+			inet_ntoa(node->addr.sin_addr),
+			ntohs(node->addr.sin_port));
+
+	assert(node->request != NULL);
+	kill_node(node);
+	r->state = request_pending;
 }
 
-static void try_connect(int fd, short what, void *arg)
+static void __send_request_to(struct request *, struct node *);
+
+static void connectcb(int fd, short event, void *arg)
 {
 	struct node *node = arg;
-	
-	TRACE("node=%p\n", node);
-again:
-	if (!connect(fd, (struct sockaddr *)&node->addr,
-				sizeof(struct sockaddr_in)) ||
-			errno == EISCONN) {
-		TRACE("connected!\n");
-		bufferevent_enable(node->bev, EV_READ|EV_WRITE);
+	struct request *r = node->request;
+
+	TRACE("node=%p %s:%u request=%p event=%s\n",
+			node,
+			inet_ntoa(node->addr.sin_addr),
+			ntohs(node->addr.sin_port),
+			r,
+			event == EV_TIMEOUT ? "EV_TIMEOUT" :
+			"EV_READ");
+
+	assert(node->request != NULL);
+
+	if (event == EV_TIMEOUT) {
+		r->state = request_pending;
 		return;
 	}
 
-	TRACE("%s\n", strerror(errno));
-
-	if (errno == EINTR)
+again:
+	switch(try_connect(node)) {
+	case 0:
+	case -EISCONN:
+		node->state = node_ready;
+		__send_request_to(r, node);
+		break;
+	case -EAGAIN:
 		goto again;
-
-	if (errno == EALREADY || errno == EINPROGRESS)
-		event_add(&node->connect_event, NULL);
-	else {
+	case -EALREADY:
+	case -EINPROGRESS:
+		TRACE("node=%p retry\n", node);
+		event_add(&node->connect_event, &node->connect_timeout);
+		break;
+	default:
+		TRACE("node=%p failed\n", node);
 		kill_node(node);
-		TRACE("connect failed\n");
+		r->state = request_pending;
 	}
 }
 
-static void write_request(struct node *node, struct request *request)
+static struct node *create_node(const struct sockaddr_in *addr)
 {
-	TRACE("write_request node=%s:%u request=%p\n",
+	struct node *node;
+	int fl;
+
+	TRACE("%s:%u\n", inet_ntoa(addr->sin_addr), ntohs(addr->sin_port));
+
+	node = malloc(sizeof(struct node));
+	if (!node)
+		return NULL;
+
+	memset(node, 0, sizeof(struct node));
+
+	node->fd = socket(AF_INET, SOCK_STREAM, 0);
+	if (node->fd < 0) {
+		ERROR("socket: %s\n", strerror(errno));
+		free(node);
+		return NULL;
+	}
+
+	fl = fcntl(node->fd, F_GETFL);
+	fcntl(node->fd, F_SETFL, fl | O_NONBLOCK);
+
+	node->bev = bufferevent_new(node->fd, readcb, NULL, errorcb, node);
+	if (!node->bev) {
+		ERROR("bufferevent_new: %s\n", strerror(errno));
+		close(node->fd);
+		free(node);
+		return NULL;
+	}
+
+	node->addr = *addr;
+	event_set(&node->connect_event, node->fd, EV_WRITE | EV_TIMEOUT,
+			connectcb, node);
+
+	list_head_init(&node->node_entry);
+
+again:
+	switch(try_connect(node)) {
+	case 0:
+	case -EISCONN:
+		node->state = node_ready;
+		return node;
+	case -EAGAIN:
+		goto again;
+	case -EINPROGRESS:
+	case -EALREADY:
+		node->state = node_connecting;
+		return node;
+	default:
+		kill_node(node);
+		free(node);
+	}
+
+	return NULL;
+}
+
+static void __send_request_to(struct request *request, struct node *node)
+{
+	TRACE("node=%s:%u request=%p\n",
+			inet_ntoa(node->addr.sin_addr),
+			ntohs(node->addr.sin_port),
+			request);
+
+	bufferevent_base_set(request->base, node->bev);
+	bufferevent_write(node->bev, EVBUFFER_DATA(request->evbuf),
+			EVBUFFER_LENGTH(request->evbuf));
+	bufferevent_enable(node->bev, EV_READ | EV_WRITE);
+}
+
+static void send_request_to(struct request *request, struct node *node)
+{
+	TRACE("node=%s:%u request=%p\n",
 			inet_ntoa(node->addr.sin_addr),
 			ntohs(node->addr.sin_port),
 			request);
 
 	node->request = request;
-	list_add(&node->node_entry, &request->node_list);
+	request->state = request_waiting;
 
-	bufferevent_base_set(request->base, node->bev);
-	bufferevent_write(node->bev, EVBUFFER_DATA(request->evbuf),
-			EVBUFFER_LENGTH(request->evbuf));
+	if (node->state == node_connecting) {
+		node->connect_timeout = request->connect_timeout;
+		event_base_set(request->base, &node->connect_event);
+		event_add(&node->connect_event, &node->connect_timeout);
+	} else
+		__send_request_to(request, node);
 }
 
-static int send_request_to(struct request *request,
-		const struct sockaddr_in *addr)
+static struct node *dequeue_node(struct request *request)
+{
+	struct sockaddr_in addr;
+	struct node *node;
+
+	TRACE("request=%p\n", request);
+
+	while (dequeue_addr(&request->addr_queue, &addr)) {
+		node = find_node(&addr);
+		if (node)
+			return node;
+
+		node = create_node(&addr);
+		if (node)
+			return node;
+	}
+
+	if (list_empty(&request->connecting_nodes))
+		return NULL;
+
+	node = list_entry(request->connecting_nodes.next,
+			struct node, node_entry);
+	list_del_init(&node->node_entry);
+
+	return node;
+}
+
+static void cache_node(struct node *node, struct request *request)
+{
+	if (node->state == node_connecting) {
+		list_add_tail(&node->node_entry,
+				&request->connecting_nodes);
+	} else if (node->state == node_dead) {
+		free(node);
+	} else if (cache_count < CACHE_MAX) {
+		lock(&cache_mutex);
+		cache_count ++;
+		list_add_tail(&node->node_entry, &node_cache);
+		unlock(&cache_mutex);
+	} else {
+		kill_node(node);
+		free(node);
+	}
+}
+
+static void timeoutcb(int fd, short event, void *arg)
+{
+	struct request *request = arg;
+	request->state = request_timedout;
+	TRACE("request=%p\n", arg);
+}
+
+static int __issue_request(struct request *request)
 {
 	struct node *node;
-	int fl;
 
-	node = find_node(addr);
-	if (node == &dead_node) {
-		TRACE("dead node\n");
-		return -EINVAL;
-	}
-	if (node) {
-		write_request(node, request);
-		bufferevent_enable(node->bev, EV_READ|EV_WRITE);
-		return 0;
-	}
+	while (request->state == request_pending) {
+		node = dequeue_node(request);
+		if (!node)
+			return -EIO;
 
-	node = malloc(sizeof(struct node));
-	if (!node)
-		return -ENOMEM;
+		send_request_to(request, node);
 
-	node->addr = *addr;
+		while (request->state == request_waiting)
+			if (event_base_loop(request->base, EVLOOP_ONCE))
+				break;
 
-	node->sk = socket(AF_INET, SOCK_STREAM, 0);
-	if (node->sk < 0) {
-		ERROR("socket: %s\n", strerror(errno));
-		free(node);
-		return -EIO;
+		assert(request->state != request_waiting);
+
+		cache_node(node, request);
+
+		if (request->chunk && request->state == request_complete)
+			if (!verify_chunk(request->chunk, request->digest))
+				request->state = request_pending;
 	}
 
-	fl = fcntl(node->sk, F_GETFL);
-	fcntl(node->sk, F_SETFL, fl | O_NONBLOCK);
+	if (request->state == request_timedout)
+		return -ETIMEDOUT;
 
-	node->bev = bufferevent_new(node->sk, readcb, NULL, errorcb, node);
-	if (!node->bev) {
-		ERROR("bufferevent_new: %s\n", strerror(errno));
-		close(node->sk);
-		free(node);
-		return -EIO;
-	}
-
-	write_request(node, request);
-	bufferevent_disable(node->bev, EV_READ | EV_WRITE);
-
-	event_set(&node->connect_event, node->sk, EV_WRITE, try_connect, node);
-	event_base_set(request->base, &node->connect_event);
-
-	try_connect(node->sk, EV_WRITE, node);
+	if (request->state == request_complete)
+		return CHUNK_SIZE;
 
 	return 0;
 }
 
-static void timeout_cb(int fd, short event, void *arg)
-{
-	TRACE("request=%p\n", arg);
-}
-
-static int send_request(struct evbuffer *evbuf, struct zdb_info *db_info,
+static int issue_request(struct evbuffer *evbuf, struct zdb_info *db_info,
 		const unsigned char *digest, unsigned char *chunk)
 {
-	struct timeval timeout = db_info->timeout;
 	struct request request;
-	struct event to_event;
-	struct node *node;
-	int err;
+	int error;
 
-	request.evbuf = evbuf;
-	request.chunk = chunk;
-	request.digest = digest;
-	list_head_init(&request.node_list);
-	request.addr_list = NULL;
-	request.addr_count = 0;
-	request.addr_index = 0;
-	request.addr_concurrency = 0;
-	request.done = 0;
-
-	request.base = event_base_new();
+	request.base = current_base ?: event_base_new();
 	if (!request.base) {
 		ERROR("event_base: %s\n", strerror(errno));
 		return -EIO;
 	}
 
+	if (chunk)
+		memset(chunk, 0, CHUNK_SIZE);
+
+	request.evbuf = evbuf;
+	request.chunk = chunk;
+	request.digest = digest;
+	request.state = request_pending;
+	request.connect_timeout = db_info->connect_timeout;
+	request.timeout = db_info->request_timeout;
+
+	addr_queue_init(&request.addr_queue);
+	list_head_init(&request.connecting_nodes);
+
+	timeout_set(&request.timeout_event, timeoutcb, &request);
+	event_base_set(request.base, &request.timeout_event);
+	timeout_add(&request.timeout_event, &request.timeout);
+
+	queue_addr(&request.addr_queue, &db_info->start_node);
+
+	error = __issue_request(&request);
+
+	timeout_del(&request.timeout_event);
+	evbuffer_free(request.evbuf);
+
+	addr_queue_destroy(&request.addr_queue);
+
+	if (!current_base)
+		event_base_free(request.base);
+
 	lock(&cache_mutex);
-	list_for_each_entry(node, &node_cache, node_entry) {
-		if (request.addr_concurrency >= db_info->min_concurrency)
-			break;
-		store_addr(&request, &node->addr);
-	}
+	list_splice(&request.connecting_nodes, &node_cache);
 	unlock(&cache_mutex);
 
-	if (request.addr_concurrency < db_info->min_concurrency)
-		store_addr(&request, &db_info->start_node);
-
-	timeout_set(&to_event, timeout_cb, &request);
-	event_base_set(request.base, &to_event);
-	timeout_add(&to_event, &timeout);
-
-	err = -EIO;
-	for (;;) {
-		while (request.addr_index != request.addr_count) {
-			if (request.addr_concurrency >=
-					db_info->max_concurrency)
-				break;
-			send_request_to(&request,
-					&request.addr_list[request.addr_index]);
-			request.addr_index ++;
-			request.addr_concurrency ++;
-		}
-		if (!timeout_pending(&to_event, &timeout)) {
-			err = -ETIMEDOUT;
-			break;
-		}
-		if (list_empty(&request.node_list))
-			break;
-		if (event_base_loop(request.base, EVLOOP_ONCE))
-			break;
-		if (!request.done)
-			continue;
-		if (!chunk)
-			err = CHUNK_SIZE;
-		else if (!request.chunk && verify_chunk(chunk, digest)) {
-			err = CHUNK_SIZE;
-			break;
-		} else {
-			request.chunk = chunk;
-			request.done --;
-		}
-	}
-
-	release_node_list(&request.node_list, err);
-
-	timeout_del(&to_event);
-
-	free(request.addr_list);
-
-	evbuffer_free(request.evbuf);
-	event_base_free(request.base);
-
-	return err;
+	return error;
 }
 
-static int zdb_read_chunk(unsigned char *chunk, const unsigned char *digest,
+static bool zdb_read_chunk(unsigned char *chunk, const unsigned char *digest,
 		void *db_info)
 {
 	struct evbuffer *request;
@@ -500,16 +551,17 @@ static int zdb_read_chunk(unsigned char *chunk, const unsigned char *digest,
 				digest_string(digest)) < 0) {
 		TRACE("evbuffer_add failed\n");
 		evbuffer_free(request);
-		return -EIO;
+		return false;
 	}
 
-	return send_request(request, db_info, digest, chunk);
+	return issue_request(request, db_info, digest, chunk) == 0;
 }
 
-static int zdb_write_chunk(const unsigned char *chunk,
+static bool zdb_write_chunk(const unsigned char *chunk,
 		const unsigned char *digest, void *db_info)
 {
 	struct evbuffer *request;
+	struct zdb_info *zdb_info = db_info;
 
 	TRACE("digest=%s\n", digest_string(digest));
 
@@ -517,15 +569,15 @@ static int zdb_write_chunk(const unsigned char *chunk,
 	if (!request)
 		return -ENOMEM;
 
-	if (evbuffer_add_printf(request, "%s ", STORE_CHUNK) < 0 ||
+	if (evbuffer_add_printf(request, "%s ", zdb_info->store_method) < 0 ||
 			base64_encode_evbuf(request, chunk, CHUNK_SIZE) < 0 ||
 			evbuffer_add(request, "\r\n", 2) < 0) {
 		TRACE("evbuffer_add failed\n");
 		evbuffer_free(request);
-		return -EIO;
+		return false;
 	}
 
-	return send_request(request, db_info, digest, NULL);
+	return issue_request(request, db_info, digest, NULL) == 0;
 }
 
 static const char *suffix(const char *str, const char *prefix)
@@ -536,7 +588,7 @@ static const char *suffix(const char *str, const char *prefix)
 	return NULL;
 }
 
-static int parse_spec(const char *spec, struct zdb_info *zdb_info)
+static char *parse_spec(const char *spec, struct zdb_info *zdb_info)
 {
 	static struct addrinfo ai_hint = {
 		.ai_family = AF_INET,
@@ -552,9 +604,11 @@ static int parse_spec(const char *spec, struct zdb_info *zdb_info)
 
 	spec_copy = alloca(strlen(spec + 1));
 	if (!spec_copy)
-		return -ENOMEM;
+		return ERR_PTR(ENOMEM);
 
 	strcpy(spec_copy, spec);
+
+	TRACE("spec_copy=%s\n", spec_copy);
 
 	addr = NULL;
 
@@ -562,23 +616,16 @@ static int parse_spec(const char *spec, struct zdb_info *zdb_info)
 		if (!opt_count) {
 			addr = opt;
 			port = strchr(addr, ':');
-			if (!port) {
-				ERROR("No port\n");
-				return -EINVAL;
-			}
+			if (!port)
+				return sprintf_new("No port in address.");
 			*port++ = 0;
 
 			err = getaddrinfo(addr, port, &ai_hint, &ai_list);
-			if (err) {
-				err = -errno;
-				ERROR("getaddrinfo: %s\n", strerror(errno));
-				return err;
-			}
+			if (err)
+				return sprintf_new("%s.", gai_strerror(err));
 
-			if (!ai_list) {
-				ERROR("ai_list == NULL\n");
-				return -EINVAL;
-			}
+			if (!ai_list)
+				return sprintf_new("ai_list == NULL.");
 
 			/*
 			 * Just take the first addr for now.
@@ -589,75 +636,57 @@ static int parse_spec(const char *spec, struct zdb_info *zdb_info)
 			freeaddrinfo(ai_list);
 
 		} else if ((value = suffix(opt, "timeout="))) {
-			zdb_info->timeout.tv_sec = atoi(value);
-			if (!zdb_info->timeout.tv_sec)
-				return -EINVAL;
+			zdb_info->request_timeout.tv_sec = atoi(value);
+			if (!zdb_info->request_timeout.tv_sec) {
+				return sprintf_new("Invalid timeout "
+						"value of %s.", value);
+			}
 
-		} else if ((value = suffix(opt, "min-concurrency="))) {
-			zdb_info->min_concurrency = atoi(value);
-			if (!zdb_info->min_concurrency)
-				return -EINVAL;
-
-		} else if ((value = suffix(opt, "max-concurrency="))) {
-			zdb_info->max_concurrency = atoi(value);
-			if (!zdb_info->max_concurrency)
-				return -EINVAL;
+		} else if (!strcmp(opt, "store")) {
+			zdb_info->store_method = STORE_CHUNK;
 
 		} else {
-			ERROR("Unknown option: %s\n", opt);
-			return -EINVAL;
+			return sprintf_new("Unknown option '%s'.", opt);
 		}
 	}
 
-	if (!addr) {
-		ERROR("No address.\n");
-		return -EINVAL;
-	}
-
-	if (zdb_info->max_concurrency < zdb_info->min_concurrency) {
-		ERROR("max-concurrency < min-concurrency\n");
-		return -EINVAL;
-	}
+	if (!addr)
+		return sprintf_new("No address specified.");
 
 	return 0;
 }
 
-static struct chunk_db *zdb_chunkdb_ctor(int mode, const char *spec)
+static char *zdb_chunkdb_ctor(const char *spec, struct chunk_db *chunk_db)
 {
-	struct chunk_db *cdb;
-	struct zdb_info *zdb_info;
-	int err;
+	struct zdb_info *zdb_info = chunk_db->db_info;
 
-	spec = suffix(spec, "zunkdb:");
-	if (!spec)
-		return NULL;
+	zdb_info->request_timeout.tv_sec = 60;
+	zdb_info->request_timeout.tv_usec = 0;
 
-	cdb = malloc(sizeof(struct chunk_db) + sizeof(struct zdb_info));
-	if (!cdb)
-		return ERR_PTR(ENOMEM);
+	zdb_info->connect_timeout.tv_sec = 1;
+	zdb_info->connect_timeout.tv_usec = 0;
 
-	zdb_info = (void *)(cdb + 1);
-	cdb->db_info = zdb_info;
+	zdb_info->store_method = FORWARD_CHUNK;
 
-	zdb_info->timeout.tv_sec = 60;
-	zdb_info->timeout.tv_usec = 0;
-
-	zdb_info->max_concurrency = -1;
-	zdb_info->min_concurrency = 1;
-
-	cdb->read_chunk = zdb_read_chunk;
-	cdb->write_chunk = (mode == CHUNKDB_RW) ? zdb_write_chunk : NULL;
-
-	err = parse_spec(spec, zdb_info);
-	if (!err)
-		return cdb;
-
-	free(cdb);
-	return ERR_PTR(err);
+	return parse_spec(spec, zdb_info);
 }
 
-static void __attribute__((constructor)) init_chunkdb_zdb(void)
-{
-	register_chunkdb(zdb_chunkdb_ctor);
-}
+static struct chunk_db_type zdb_chunkdb_type = {
+	.spec_prefix = "zunkdb:",
+	.info_size = sizeof(struct zdb_info),
+	.ctor = zdb_chunkdb_ctor,
+	.read_chunk = zdb_read_chunk,
+	.write_chunk = zdb_write_chunk,
+	.help =
+"   zunkdb:<node>[,opts]    Use a \"zunk\" database for chunk storage.\n"
+"                           Initial node is passed in as <ip|name>:<port>.\n"
+"                           Options include:\n"
+"                              timeout=#  Set request timeout (in seconds)\n"
+"                              use_store  Use STORE instead of FORWARD\n"
+"                                         to send chunks to zunkdb. Use this\n"
+"                                         only if you have a fast uplink, as\n"
+"                                         it will end up sending the same\n"
+"                                         chunk to multiple zunkdb nodes.\n"
+};
 
+REGISTER_CHUNKDB(zdb_chunkdb_type);

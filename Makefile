@@ -6,7 +6,8 @@ LIBEVENT_PREFIX=.
 endif
 
 LDFLAGS=-lssl -lsqlite3 $(FUSE_LIBS) -L$(LIBEVENT_PREFIX)/lib -levent
-CFLAGS=-g -Wall $(FUSE_CFLAGS) -DZUNKFS_OS=$(OS) -I$(LIBEVENT_PREFIX)/include
+CFLAGS=-g -Wall $(FUSE_CFLAGS) -DZUNKFS_OS=$(OS) -I$(LIBEVENT_PREFIX)/include \
+       -Werror
 OS=$(shell /usr/bin/env uname)
 
 ifdef CHUNK_SIZE
@@ -20,6 +21,7 @@ endif
 
 ifeq ("$(OS)","Linux")
 FUSE_CFLAGS+=-D_FILE_OFFSET_BITS=64
+CFLAGS+=-DHAVE_POSIX_FADVISE
 endif
 
 CORE_OBJS=chunk-tree.o \
@@ -36,9 +38,12 @@ DBTYPES=chunk-db-local.o \
 	chunk-db-map.o \
 	chunk-db-sqlite.o \
 	chunk-db-mem.o \
-	chunk-db-zdb.o
+	chunk-db-zdb.o \
+	chunk-db-file.o
 
-UNIT_TEST_OBJS=$(CORE_OBJS) unit-test-utils.o chunk-db-mem.o
+UNIT_TEST_OBJS=$(CORE_OBJS) \
+	       unit-test-utils.o \
+	       chunk-db-mem.o
 
 FINAL_OBJS=zunkfs \
 	   ctree-unit-test \
@@ -46,11 +51,16 @@ FINAL_OBJS=zunkfs \
 	   file-unit-test \
 	   zunkfs-list-ddents \
 	   zunkfs-add-ddent \
-	   zunkdb
+	   zunkdb \
+	   chunk-db-unit-test
 
 all: ${FINAL_OBJS}
 
-tests: ctree-unit-test dir-unit-test file-unit-test base64-test test-client
+tests: ctree-unit-test dir-unit-test file-unit-test base64-test
+
+cscope:
+	find . -name '*.[ch]' > cscope.files
+	cscope -b -i cscope.files
 
 zunkfs: $(CORE_OBJS) $(DBTYPES) fuse.o
 	$(CC) -o $@ $^ $(LDFLAGS)
@@ -70,15 +80,15 @@ zunkfs-list-ddents: $(CORE_OBJS) $(DBTYPES) zunkfs-list-ddents.o
 zunkfs-add-ddent: $(CORE_OBJS) $(DBTYPES) zunkfs-add-ddent.o 
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-zunkdb: zunkdb.o base64.o digest.o utils.o mutex.o
+zunkdb: $(CORE_OBJS) $(DBTYPES) zunkdb.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-test-client: client.o base64.o
+chunk-db-unit-test: $(CORE_OBJS) $(DBTYPES) chunk-db-unit-test.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 base64-test: base64-test.o base64.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 clean:
-	@rm -f $(FINAL_OBJS) *.o *.out *.log core
+	@rm -f $(FINAL_OBJS) *.o *.out *.log core cscope.*
 

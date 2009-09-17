@@ -10,9 +10,9 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/types.h>
 
 #include "zunkfs.h"
@@ -26,22 +26,26 @@ static const char spaces[] = "                                                  
 static void test1(void);
 static void test2(void);
 static void test3(void);
+static void test4(void);
 
 int main(int argc, char **argv)
 {
 	struct disk_dentry root_ddent;
+	struct timeval now;
 	DECLARE_MUTEX(root_mutex);
+	char *errstr;
 	int err;
 
 	fprintf(stderr, "DIRENTS_PER_CHUNK=%lu\n",
 			(unsigned long)DIRENTS_PER_CHUNK);
 
-	zunkfs_log_fd = stdout;
-	zunkfs_log_level = 'T';
-
-	err = add_chunkdb("rw,mem:");
+	err = set_logging("T,stdout");
 	if (err)
-		panic("add_chunkdb: %s\n", strerror(-err));
+		panic("set_logging: %s\n", strerror(-err));
+
+	errstr = add_chunkdb("rw,mem:");
+	if (errstr)
+		panic("add_chunkdb: %s\n", STR_OR_ERROR(errstr));
 
 	err = init_disk_dentry(&root_ddent);
 	if (err < 0)
@@ -49,10 +53,12 @@ int main(int argc, char **argv)
 
 	namcpy(root_ddent.name, "/");
 
-	root_ddent.mode = S_IFDIR | S_IRWXU;
-	root_ddent.size = 0;
-	root_ddent.ctime = time(NULL);
-	root_ddent.mtime = time(NULL);
+	gettimeofday(&now, NULL);
+
+	root_ddent.mode = htole16(S_IFDIR | S_IRWXU);
+	root_ddent.size = htole64(0);
+	root_ddent.ctime = htole32(now.tv_sec);
+	root_ddent.mtime = htole32(now.tv_sec);
 
 	err = set_root(&root_ddent, &root_mutex);
 	if (err)
@@ -62,8 +68,10 @@ int main(int argc, char **argv)
 		test1();
 	if (0)
 		test2();
-	if (1)
+	if (0)
 		test3();
+	if (1)
+		test4();
 
 	return 0;
 }
@@ -318,4 +326,54 @@ static void test3(void)
 
 	put_dentry(root);
 }
+
+static void test4(void)
+{
+	struct dentry *root;
+	struct dentry *foo;
+	struct dentry *bar;
+
+	root = find_dentry("/", NULL);
+	if (IS_ERR(root))
+		panic("find_dentry(/): %s\n", strerror(PTR_ERR(root)));
+
+	foo = locked_add_dentry(root, "foo", S_IFREG | S_IRWXU);
+	if (IS_ERR(foo))
+		panic("add_dentry(foo): %s\n", strerror(PTR_ERR(foo)));
+
+	bar = locked_add_dentry(root, "bar", S_IFDIR | S_IRWXU);
+	if (IS_ERR(bar))
+		panic("add_dentry(bar): %s\n", strerror(PTR_ERR(bar)));
+
+	put_dentry(foo);
+	put_dentry(bar);
+	put_dentry(root);
+
+	foo = find_dentry("/foo", NULL);
+	if (IS_ERR(foo))
+		panic("find_dentry(/foo): %s\n", strerror(PTR_ERR(foo)));
+
+	printf("foo mode: 0%o (expected 0%o)\n", foo->mode, S_IFREG | S_IRWXU);
+
+	dentry_chmod(foo, S_IRUSR | S_IXUSR);
+
+	printf("foo mode: 0%o (expected 0%o)\n", foo->mode,
+			S_IFREG | S_IRUSR | S_IXUSR);
+
+	put_dentry(foo);
+
+	bar = find_dentry("/bar", NULL);
+	if (IS_ERR(bar))
+		panic("find_dentry(/bar): %s\n", strerror(PTR_ERR(bar)));
+
+	printf("bar mode: 0%o (expected 0%o)\n", bar->mode, S_IFDIR | S_IRWXU);
+
+	dentry_chmod(bar, S_IRUSR | S_IXUSR);
+
+	printf("bar mode: 0%o (expected 0%o)\n", bar->mode,
+			S_IFDIR | S_IRUSR | S_IXUSR);
+
+	put_dentry(bar);
+}
+
 

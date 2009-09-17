@@ -18,6 +18,7 @@
 static unsigned full_output = 0;
 
 enum {
+	OPT_REQUIRED_ARG = ':',
 	OPT_CHUNK_DB = 'd',
 	OPT_LOG = 'l',
 	OPT_FULL = 'f',
@@ -25,8 +26,8 @@ enum {
 };
 
 static const char short_opts[] = {
-	OPT_CHUNK_DB,
-	OPT_LOG,
+	OPT_CHUNK_DB, OPT_REQUIRED_ARG,
+	OPT_LOG, OPT_REQUIRED_ARG,
 	OPT_FULL,
 	OPT_HELP,
 	0
@@ -56,39 +57,28 @@ static void usage(int exit_code)
 
 static void proc_opt(int opt, char *arg)
 {
+	char *errstr;
 	int err;
 
 	switch(opt) {
 	case OPT_HELP:
 		usage(0);
 	case OPT_CHUNK_DB:
-		err = add_chunkdb(arg);
-		if (err) {
+		errstr = add_chunkdb(arg);
+		if (errstr) {
 			fprintf(stderr, "Failed to add chunkdb %s: %s\n", arg,
-					strerror(-err));
+					STR_OR_ERROR(errstr));
 			exit(-2);
 		}
 		break;
 
 	case OPT_LOG:
-		if (zunkfs_log_fd) {
-			fprintf(stderr, "Log file specified more than once.\n");
-			exit(-1);
+		err = set_logging(arg);
+		if (err) {
+			fprintf(stderr, "Failed to enable logging: %s\n",
+					strerror(-err));
+			exit(-2);
 		}
-		if (arg[1] == ',') {
-			if (!strchr("EWT", arg[0])) {
-				fprintf(stderr, "Invalid log level.\n");
-				exit(-1);
-			}
-			zunkfs_log_level = arg[0];
-			arg += 2;
-		}
-		if (!strcmp(arg, "stderr"))
-			zunkfs_log_fd = stderr;
-		else if (!strcmp(arg, "stdout"))
-			zunkfs_log_fd = stdout;
-		else
-			zunkfs_log_fd = fopen(arg, "w");
 		break;
 	case OPT_FULL:
 		full_output = 1;
@@ -120,6 +110,7 @@ static int read_dentry(int fd, struct disk_dentry *de)
 
 int main(int argc, char **argv)
 {
+	const char *crypto;
 	char cwd[1024];
 	int fd, opt;
 
@@ -150,20 +141,28 @@ int main(int argc, char **argv)
 		}
 		if (!err)
 			break;
+
+		if ((dentry.flags & DDENT_USE_BLOWFISH))
+			crypto = "blowfish";
+		else
+			crypto = "xor";
+
 		if (full_output) {
-			printf("%s %s 0%0o %"PRIu64" %u %u %s\n", 
+			printf("%s %s 0%0o %"PRIu64" %u %u %s %s\n", 
 					digest_string(dentry.digest),
 					digest_string(dentry.secret_digest),
-					dentry.mode,
-					dentry.size,
-					dentry.ctime,
-					dentry.mtime,
+					le16toh(dentry.mode),
+					le64toh(dentry.size),
+					le32toh(dentry.ctime),
+					le32toh(dentry.mtime),
+					crypto,
 					dentry.name);
 		} else {
-			printf("%s %s %"PRIu64" %s\n",
+			printf("%s %s %"PRIu64" %s %s\n",
 					digest_string(dentry.digest),
 					digest_string(dentry.secret_digest),
-					dentry.size,
+					le64toh(dentry.size),
+					crypto,
 					dentry.name);
 		}
 	}

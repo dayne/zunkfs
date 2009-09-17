@@ -105,7 +105,9 @@ write_again:
 	timersub(&end, &start, &delta);
 	start = end;
 
-	printf("time to import: %lu.%06u\n", delta.tv_sec, delta.tv_usec);
+	printf("time to import: %lu.%06lu\n",
+			(unsigned long)delta.tv_sec,
+			(unsigned long)delta.tv_usec);
 
 	fprintf(stderr, "verifying...\n");
 	err = lseek(fd, 0, SEEK_SET);
@@ -141,9 +143,9 @@ read_again3:
 	}
 
 	printf("size=%"PRIu64" nr_leafs=%u height=%u\n",
-			ofile->dentry->size,
-			ofile->dentry->chunk_tree.nr_leafs,
-			ofile->dentry->chunk_tree.height);
+			file_dentry(ofile)->size,
+			file_dentry(ofile)->chunk_tree.nr_leafs,
+			file_dentry(ofile)->chunk_tree.height);
 
 	err = close_file(ofile);
 	if (err < 0)
@@ -154,21 +156,25 @@ read_again3:
 	gettimeofday(&end, NULL);
 	timersub(&end, &start, &delta);
 
-	printf("time to verify: %lu.%06u\n", delta.tv_sec, delta.tv_usec);
+	printf("time to verify: %lu.%06lu\n",
+			(unsigned long)delta.tv_sec,
+			(unsigned long)delta.tv_usec);
 }
 
 int main(int argc, char **argv)
 {
 	struct disk_dentry root_ddent;
 	DECLARE_MUTEX(root_mutex);
+	char *errstr;
 	int i, err;
 
-	zunkfs_log_fd = stdout;
-	zunkfs_log_level = 'T';
-
-	err = add_chunkdb("rw,mem:");
+	err = set_logging("T,stdout");
 	if (err)
-		panic("add_chunkdb: %s\n", strerror(-err));
+		panic("set_logging: %s\n", strerror(-err));
+
+	errstr = add_chunkdb("rw,mem:");
+	if (errstr)
+		panic("add_chunkdb: %s\n", STR_OR_ERROR(errstr));
 
 	err = init_disk_dentry(&root_ddent);
 	if (err < 0)
@@ -176,10 +182,10 @@ int main(int argc, char **argv)
 
 	namcpy(root_ddent.name, "/");
 
-	root_ddent.mode = S_IFDIR | S_IRWXU;
-	root_ddent.size = 0;
-	root_ddent.ctime = time(NULL);
-	root_ddent.mtime = time(NULL);
+	root_ddent.mode = htole16(S_IFDIR | S_IRWXU);
+	root_ddent.size = htole64(0);
+	root_ddent.ctime = htole32(time(NULL));
+	root_ddent.mtime = htole32(time(NULL));
 
 	err = set_root(&root_ddent, &root_mutex);
 	if (err)

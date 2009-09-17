@@ -9,9 +9,11 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
+#include <sys/time.h>
 #include <sys/stat.h>
+
+#include <openssl/blowfish.h>
 
 #include "dir.h"
 
@@ -28,16 +30,44 @@ static inline unsigned dentry_index(const struct dentry *dentry)
 		(struct disk_dentry *)dentry->ddent_cnode->chunk_data;
 }
 
+#define chunk_cnode(chunk) \
+	container_of(chunk, struct chunk_node, chunk_data)
+#define chunk_dentry(chunk) \
+	container_of(chunk_cnode(chunk)->ctree, struct dentry, chunk_tree)
+
+static void xor_chunk(unsigned char *dst, const unsigned char *src,
+		const unsigned char *secret)
+{
+	int i;
+	for (i = 0; i < CHUNK_SIZE; i ++)
+		*dst++ = *src++ ^ *secret++;
+}
+
+static void bf_chunk(unsigned char *dst, const unsigned char *src,
+		const unsigned char *secret, int enc)
+{
+	BF_KEY bf_key;
+	int i;
+
+	BF_set_key(&bf_key, CHUNK_SIZE, secret);
+
+	/* BF_ecb_encrypt works with 64bits at a time */
+	for (i = 0; i < CHUNK_SIZE/8; i ++) {
+		BF_ecb_encrypt(src, dst, &bf_key, enc);
+		src += 8;
+		dst += 8;
+	}
+}
+
 static int read_dentry_chunk(unsigned char *chunk, const unsigned char *digest)
 {
-	const struct chunk_node *cnode;
-	const struct dentry *dentry;
-	int i, err;
-
-	cnode = container_of(chunk, struct chunk_node, chunk_data);
-	dentry = container_of(cnode->ctree, struct dentry, chunk_tree);
+	const struct dentry *dentry = chunk_dentry(chunk);
+	int err;
 
 	assert(dentry->secret_chunk != NULL);
+
+	if ((dentry->ddent->flags & ~DDENT_VALID_FLAGS) != 0)
+		return -ENOTSUP;
 
 	/*
 	 * Chunk will be empty, so nothing to read.
@@ -46,33 +76,50 @@ static int read_dentry_chunk(unsigned char *chunk, const unsigned char *digest)
 		return 0;
 
 	err = read_chunk(chunk, digest);
+	if (err == -ENOENT)
+		return -EIO;
 	if (err < 0)
 		return err;
 
-	for (i = 0; i < CHUNK_SIZE; i ++)
-		chunk[i] ^= dentry->secret_chunk[i];
+	switch(dentry->ddent->flags & DDENT_CRYPTO_MASK) {
+	case DDENT_USE_XOR:
+		xor_chunk(chunk, chunk, dentry->secret_chunk);
+		break;
+	case DDENT_USE_BLOWFISH:
+		bf_chunk(chunk, chunk, dentry->secret_chunk, BF_DECRYPT);
+		break;
+	default:
+		return -ENOTSUP;
+	}
 
-	return err;
+	return CHUNK_SIZE;
 }
 
 static int write_dentry_chunk(const unsigned char *chunk, unsigned char *digest)
 {
-	const struct chunk_node *cnode;
-	const struct dentry *dentry;
+	const struct dentry *dentry = chunk_dentry(chunk);
 	unsigned char real_chunk[CHUNK_SIZE];
-	int i, err;
-
-	cnode = container_of(chunk, struct chunk_node, chunk_data);
-	dentry = container_of(cnode->ctree, struct dentry, chunk_tree);
+	int err;
 
 	assert(dentry->secret_chunk != NULL);
 
-	for (i = 0; i < CHUNK_SIZE; i ++)
-		real_chunk[i] = chunk[i] ^ dentry->secret_chunk[i];
+	if ((dentry->ddent->flags & ~DDENT_VALID_FLAGS) != 0)
+		return -ENOTSUP;
+
+	switch(dentry->ddent->flags & DDENT_CRYPTO_MASK) {
+	case DDENT_USE_XOR:
+		xor_chunk(real_chunk, chunk, dentry->secret_chunk);
+		break;
+	case DDENT_USE_BLOWFISH:
+		bf_chunk(real_chunk, chunk, dentry->secret_chunk, BF_ENCRYPT);
+		break;
+	default:
+		return -ENOTSUP;
+	}
 
 	err = write_chunk(real_chunk, digest);
-	if (err < 0)
-		return err;
+	if (err == -EEXIST)
+		return CHUNK_SIZE;
 
 	return err;
 }
@@ -99,8 +146,10 @@ static struct dentry *new_dentry(struct dentry *parent,
 	dentry->ddent_cnode = ddent_cnode;
 	dentry->ddent_mutex = ddent_mutex;
 	dentry->parent = parent;
-	dentry->size = ddent->size;
-	dentry->mtime = ddent->mtime;
+	dentry->size = le64toh(ddent->size);
+	dentry->mode = le16toh(ddent->mode);
+	dentry->mtime.tv_sec = le32toh(ddent->mtime);
+	dentry->mtime.tv_usec = ddent->mtime_csec * 10000;
 
 	init_mutex(&dentry->mutex);
 	dentry->ref_count = 0;
@@ -131,12 +180,28 @@ int init_disk_dentry(struct disk_dentry *ddent)
 	return err;
 }
 
-static inline unsigned ddent_chunk_count(struct disk_dentry *ddent)
+static inline unsigned __dentry_chunk_count(const struct dentry *dentry)
 {
-	if (S_ISREG(ddent->mode))
-		return (ddent->size + CHUNK_SIZE - 1) / CHUNK_SIZE;
-	assert(S_ISDIR(ddent->mode));
-	return (ddent->size + DIRENTS_PER_CHUNK - 1) / DIRENTS_PER_CHUNK;
+	if (S_ISREG(dentry->mode))
+		return (dentry->size + CHUNK_SIZE - 1) / CHUNK_SIZE;
+	assert(S_ISDIR(dentry->mode));
+	return (dentry->size + DIRENTS_PER_CHUNK - 1) / DIRENTS_PER_CHUNK;
+}
+
+unsigned dentry_chunk_count(const struct dentry *dentry)
+{
+	unsigned long chunks;
+	unsigned long total;
+
+	chunks = __dentry_chunk_count(dentry);
+	total = 0;
+
+	while (chunks) {
+		total += chunks;
+		chunks /= DIGESTS_PER_CHUNK;
+	}
+
+	return total + 1; /* account for secret chunk */
 }
 
 struct chunk_node *get_dentry_chunk(struct dentry *dentry, unsigned chunk_nr)
@@ -157,7 +222,7 @@ struct chunk_node *get_dentry_chunk(struct dentry *dentry, unsigned chunk_nr)
 		if (err < 0)
 			return ERR_PTR(-err);
 		err = init_chunk_tree(&dentry->chunk_tree,
-				ddent_chunk_count(dentry->ddent),
+				__dentry_chunk_count(dentry),
 				dentry->ddent->digest, &dentry_ctree_ops);
 		if (err < 0)
 			return ERR_PTR(-err);
@@ -166,7 +231,7 @@ struct chunk_node *get_dentry_chunk(struct dentry *dentry, unsigned chunk_nr)
 	return get_nth_chunk(&dentry->chunk_tree, chunk_nr);
 }
 
-static struct dentry *__get_nth_dentry(struct dentry *parent, unsigned nr)
+static struct dentry *get_nth_dentry(struct dentry *parent, unsigned nr)
 {
 	struct dentry *dentry;
 	struct disk_dentry *ddent;
@@ -218,22 +283,6 @@ error:
 	return dentry;
 }
 
-struct dentry *get_nth_dentry(struct dentry *parent, unsigned nr)
-{
-	struct dentry *dentry;
-
-	if (!S_ISDIR(parent->ddent->mode))
-		return ERR_PTR(ENOTDIR);
-	if (nr >= parent->size)
-		return ERR_PTR(ENOENT);
-
-	lock(&parent->mutex);
-	dentry = __get_nth_dentry(parent, nr);
-	unlock(&parent->mutex);
-
-	return dentry;
-}
-
 /*
  * Dentry must be either about-to-be freed or have
  * it's mutex locked.
@@ -250,15 +299,17 @@ static void flush_dentry(struct dentry *dentry)
 					strerror(-err));
 			return;
 		}
-		if (dentry->chunk_tree.root->dirty)
+		if (is_cnode_dirty(dentry->chunk_tree.root))
 			dentry->dirty = 1;
 	}
 	
 	if (dentry->dirty) {
-		dentry->ddent->size = dentry->size;
-		dentry->ddent->mtime = dentry->mtime;
+		dentry->ddent->size = htole64(dentry->size);
+		dentry->ddent->mode = htole16(dentry->mode);
+		dentry->ddent->mtime = htole32(dentry->mtime.tv_sec);
+		dentry->ddent->mtime_csec = dentry->mtime.tv_usec / 10000;
 		if (dentry->ddent_cnode)
-			dentry->ddent_cnode->dirty = 1;
+			mark_cnode_dirty(dentry->ddent_cnode);
 		dentry->dirty = 0;
 	}
 }
@@ -329,7 +380,7 @@ static struct dentry *lookup(struct dentry *parent, const char *name, int len)
 	struct dentry *dentry;
 	unsigned nr;
 
-	assert(S_ISDIR(parent->ddent->mode));
+	assert(S_ISDIR(parent->mode));
 	assert(have_mutex(&parent->mutex));
 
 	if (len >= DDENT_NAME_MAX)
@@ -347,7 +398,7 @@ static struct dentry *lookup(struct dentry *parent, const char *name, int len)
 	}
 
 	for (nr = 0; nr < parent->size; nr ++) {
-		dentry = __get_nth_dentry(parent, nr);
+		dentry = get_nth_dentry(parent, nr);
 		if (IS_ERR(dentry))
 			goto out;
 		if (!namcmp(dentry->ddent->name, name, len) &&
@@ -365,11 +416,12 @@ out:
 	return dentry;
 }
 
-struct dentry *add_dentry(struct dentry *parent, const char *name, mode_t mode)
+struct dentry *__add_dentry(struct dentry *parent, const char *name,
+		mode_t mode, uint8_t flags)
 {
 	struct dentry *dentry;
 	unsigned name_len;
-	time_t now;
+	struct timeval now;
 
 	assert(have_mutex(&parent->mutex));
 
@@ -388,22 +440,25 @@ struct dentry *add_dentry(struct dentry *parent, const char *name, mode_t mode)
 		return ERR_PTR(EEXIST);
 	}
 
-	dentry = __get_nth_dentry(parent, parent->size);
+	dentry = get_nth_dentry(parent, parent->size);
 	if (IS_ERR(dentry))
 		return dentry;
 
-	now = time(NULL);
+	gettimeofday(&now, NULL);
 
 	namcpy(dentry->ddent->name, name);
 
-	dentry->ddent->mode = mode;
-	dentry->ddent->size = 0;
-	dentry->ddent->ctime = now;
-	dentry->ddent->mtime = now;
+	dentry->ddent->mode = htole16(mode);
+	dentry->ddent->size = htole64(0);
+	dentry->ddent->ctime = htole32(now.tv_sec);
+	dentry->ddent->mtime = htole32(now.tv_sec);
+	dentry->ddent->mtime_csec = now.tv_usec * 10000;
+	dentry->ddent->flags = flags;
 
 	dentry->dirty = 1;
 	dentry->size = 0;
 	dentry->mtime = now;
+	dentry->mode = mode;
 
 	parent->dirty = 1;
 	parent->size ++;
@@ -445,8 +500,8 @@ static void swap_dentries(struct dentry *a, struct dentry *b)
 	*a->ddent = *b->ddent;
 	*b->ddent = tmp_ddent;
 
-	a->ddent_cnode->dirty = 1;
-	b->ddent_cnode->dirty = 1;
+	mark_cnode_dirty(a->ddent_cnode);
+	mark_cnode_dirty(b->ddent_cnode);
 }
 
 static int make_last_dentry(struct dentry *dentry, struct dentry *parent)
@@ -454,7 +509,7 @@ static int make_last_dentry(struct dentry *dentry, struct dentry *parent)
 	assert(have_mutex(&parent->mutex));
 
 	if (parent->size > 1) {
-		struct dentry *tmp = __get_nth_dentry(parent, parent->size - 1);
+		struct dentry *tmp = get_nth_dentry(parent, parent->size - 1);
 		if (IS_ERR(tmp))
 			return -PTR_ERR(tmp);
 		if (tmp != dentry)
@@ -467,13 +522,17 @@ static int make_last_dentry(struct dentry *dentry, struct dentry *parent)
 
 static void __del_dentry(struct dentry *dentry, struct dentry *parent)
 {
+	struct timeval now;
+
 	assert(have_mutex(&parent->mutex));
 
 	dentry_ptr(dentry) = NULL;
 
+	gettimeofday(&now, NULL);
+
 	parent->size --;
 	parent->dirty = 1;
-	parent->mtime = time(NULL);
+	parent->mtime = now;
 }
 
 int del_dentry(struct dentry *dentry)
@@ -563,7 +622,7 @@ int set_root(struct disk_dentry *ddent, struct mutex *ddent_mutex)
 {
 	int err;
 
-	if (!S_ISDIR(ddent->mode))
+	if (!S_ISDIR(le16toh(ddent->mode)))
 		return -ENOTDIR;
 
 	assert(root_dentry == NULL || IS_ERR(root_dentry));
@@ -676,7 +735,7 @@ static int __rename_dentry(struct dentry *dentry, const char *new_name,
 	tmp = lock_order(old_parent, new_parent);
 	if (tmp == new_parent) {
 		lock(&new_parent->mutex);
-		shadow = __get_nth_dentry(new_parent, new_parent->size);
+		shadow = get_nth_dentry(new_parent, new_parent->size);
 		if (IS_ERR(shadow)) {
 			unlock(&new_parent->mutex);
 			return -PTR_ERR(shadow);
@@ -712,7 +771,7 @@ static int __rename_dentry(struct dentry *dentry, const char *new_name,
 		}
 
 		lock(&new_parent->mutex);
-		shadow = __get_nth_dentry(new_parent, new_parent->size);
+		shadow = get_nth_dentry(new_parent, new_parent->size);
 		if (IS_ERR(shadow)) {
 			unlock(&old_parent->mutex);
 			unlock(&new_parent->mutex);
@@ -756,9 +815,77 @@ int rename_dentry(struct dentry *dentry, const char *new_name,
 
 void dentry_chmod(struct dentry *dentry, mode_t mode)
 {
-	lock(dentry->ddent_mutex);
-	dentry->ddent->mode = (dentry->ddent->mode & S_IFMT) | mode;
-	unlock(dentry->ddent_mutex);
+	lock(&dentry->mutex);
+	dentry->mode = (dentry->mode & S_IFMT) | mode;
+	dentry->dirty = 1;
+	unlock(&dentry->mutex);
 }
 
+int scan_dir(struct dentry *dentry, int (*func)(struct dentry *, void *),
+		void *scan_data)
+{
+	struct dentry *child;
+	struct dentry *last;
+	unsigned i;
+	int err;
+
+	if (!S_ISDIR(dentry->mode))
+		return -ENOTDIR;
+
+	/*
+	 * Avoid constant build-up and tear-down of dir's chunk tree
+	 * by caching the previous child dentry.
+	 */
+	last = NULL;
+	err = 0;
+
+	lock(&dentry->mutex);
+	for (i = 0; i < dentry->size; i ++) {
+		child = get_nth_dentry(dentry, i);
+		if (IS_ERR(child))
+			goto error;
+
+		unlock(&dentry->mutex);
+		err = func(child, scan_data);
+		lock(&dentry->mutex);
+
+		if (err)
+			goto out;
+
+		if (last)
+			__put_dentry(last);
+		last = child;
+	}
+out:
+	if (last)
+		__put_dentry(last);
+	unlock(&dentry->mutex);
+	return err;
+error:
+	err = -PTR_ERR(child);
+	if (err == -ENOENT)
+		err = 0;
+	goto out;
+}
+
+int dup_disk_dentry(struct dentry *parent, const struct disk_dentry *src)
+{
+	struct disk_dentry *dst;
+	struct dentry *dentry;
+
+	dentry = __add_dentry(parent, (char *)src->name, le16toh(src->mode),
+			src->flags);
+	if (IS_ERR(dentry))
+		return -PTR_ERR(dentry);
+
+	dst = dentry->ddent;
+	memcpy(dst->digest, src->digest, CHUNK_DIGEST_LEN);
+	memcpy(dst->secret_digest, src->secret_digest, CHUNK_DIGEST_LEN);
+
+	dentry->size = le64toh(src->size);
+	dentry->dirty = 1;
+
+	__put_dentry(dentry);
+	return 0;
+}
 

@@ -13,7 +13,7 @@
 #include "dir.h"
 #include "chunk-db.h"
 
-#define NR_NODES	50 * DIGESTS_PER_CHUNK
+#define NR_NODES	3 * DIGESTS_PER_CHUNK
 
 static const char spaces[] = "                                                                                                                                                               ";
 #define indent_start (spaces + sizeof(spaces) - 1)
@@ -65,13 +65,15 @@ int main(int argc, char **argv)
 	struct chunk_node *cnode[NR_NODES];
 	unsigned char root_digest[CHUNK_DIGEST_LEN];
 	int i, err;
+	char *errstr;
 
-	zunkfs_log_fd = stdout;
-	zunkfs_log_level = 'T';
-
-	err = add_chunkdb("rw,mem:");
+	err = set_logging("T,stdout");
 	if (err)
-		panic("add_chunkdb: %s\n", strerror(-err));
+		panic("set_logging: %s\n", strerror(-err));
+
+	errstr = add_chunkdb("rw,mem:");
+	if (errstr)
+		panic("add_chunkdb: %s\n", STR_OR_ERROR(errstr));
 
 	err = random_chunk_digest(rand_digest);
 	if (err < 0)

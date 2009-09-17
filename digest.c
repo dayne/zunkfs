@@ -10,7 +10,7 @@ int verify_digest(const unsigned char *digest, const unsigned char *data,
 {
 	unsigned char tmp_digest[SHA_DIGEST_LENGTH];
 	SHA1(data, data_size, tmp_digest);
-	return memcmp(tmp_digest, digest, SHA_DIGEST_LENGTH);
+	return !memcmp(tmp_digest, digest, SHA_DIGEST_LENGTH);
 }
 
 static const char hex_digit[] = "0123456789abcdef";
@@ -67,4 +67,5 @@ int digest_distance(const unsigned char *a, const unsigned char *b)
 
 	return -1;
 }
+
 
